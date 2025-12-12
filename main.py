@@ -5,6 +5,7 @@ import utime
 import buttons
 import machine
 import time
+import os
 from machine import Pin, lightsleep
 updateer.run_updater()
 print("finished updating")
@@ -22,7 +23,20 @@ with open("settings.txt", "r") as f:
 
 theme_mode = settings["solid_theme"]
 brightness = settings["brightness"]
-print(f"the time is {t[3]:02d}:{t[4]:02d}:{t[5]:02d}")  # prints time
+print(f"the time is {t[3]:02d}:{t[4]:02d}:{t[5]:02d}")# prints time
+FLAG_FILE = "firstboot.flag"
+
+def write_flag_once():
+    if FLAG_FILE not in os.listdir():
+        print("first boot")
+        with open(FLAG_FILE, "x") as f:
+            f.write("1") 
+    else:
+        pass  
+        print("boot finished")
+
+write_flag_once()
+
 timer = 0
 boot = True
 while boot:
