@@ -1,4 +1,4 @@
 {
-    "version": "0.0.2.2",
-    "files": ["main.py"]
+    "version": "0.0.2.3",
+    "files": ["main.py", "wifi.py", "updateer.py"]
 }
