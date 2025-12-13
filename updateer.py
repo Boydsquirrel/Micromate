@@ -7,8 +7,7 @@ BASE_URL     = "https://raw.githubusercontent.com/Boydsquirrel/micromate/main/"
 def ver(v):
     return tuple(map(int, v.split(".")))
 
-def wait_for_wifi(timeout=15):
-    wlan = network.WLAN(network.STA_IF)
+def wait_for_wifi(wlan, timeout=15):
     wlan.active(True)
     print("Connecting to WiFi…")
 
@@ -36,29 +35,23 @@ def download_file(url, filename):
     print("Downloading:", filename)
     try:
         r = urequests.get(url, timeout=5)
-
         if r.status_code != 200:
             print("HTTP error:", r.status_code)
             r.close()
             return False
-
         tmp = filename + ".tmp"
         with open(tmp, "w") as f:
             f.write(r.text)
-
         os.rename(tmp, filename)
         r.close()
         print("Saved:", filename)
         return True
-
     except Exception as e:
         print("Failed:", e)
         return False
 
 def check_for_update():
     print("Checking for updates…")
-
-    # fetch update json
     try:
         r = urequests.get(UPDATE_JSON, timeout=5)
         data = r.json()
@@ -69,7 +62,6 @@ def check_for_update():
 
     server_ver = str(data.get("version", "0.0"))
     files_list = data.get("files", ["main.py"])
-
     local_ver = get_local_version()
     print("Local:", local_ver, "Server:", server_ver)
 
@@ -90,12 +82,10 @@ def check_for_update():
     return True
 
 def run_updater():
-    wlan = wait_for_wifi()
-    if wlan:
         check_for_update()
         wlan.active(False)
     else:
         print("Skipping update, no WiFi.")
-        
+        return "no wifi"
 
 
