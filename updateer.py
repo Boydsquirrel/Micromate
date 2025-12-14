@@ -1,24 +1,17 @@
 import network, time, urequests, machine, os
+from wifi import wifi_manager  # your WiFi code
+import usocket as socket
 
 VERSION_FILE = "version.txt"
 UPDATE_JSON  = "https://raw.githubusercontent.com/Boydsquirrel/micromate/main/version.json"
 BASE_URL     = "https://raw.githubusercontent.com/Boydsquirrel/micromate/main/"
+UPDATE_LOG_URL = "https://raw.githubusercontent.com/Boydsquirrel/micromate/main/update.txt"
+UPDATED_FILE = "updated.txt"
+PREV_UPDATES_FILE = "previous_updates.txt"
 
+# ===== Version helpers =====
 def ver(v):
     return tuple(map(int, v.split(".")))
-
-def wait_for_wifi(wlan, timeout=15):
-    wlan.active(True)
-    print("Connecting to WiFi…")
-
-    for _ in range(timeout * 2):
-        if wlan.isconnected():
-            print("Connected:", wlan.ifconfig()[0])
-            return wlan
-        time.sleep(0.5)
-
-    print("WiFi failed.")
-    return None
 
 def get_local_version():
     if VERSION_FILE not in os.listdir():
@@ -31,6 +24,7 @@ def save_local_version(v):
     with open(VERSION_FILE, "w") as f:
         f.write(v)
 
+# ===== Download a file =====
 def download_file(url, filename):
     print("Downloading:", filename)
     try:
@@ -50,8 +44,14 @@ def download_file(url, filename):
         print("Failed:", e)
         return False
 
+# ===== Check for updates =====
 def check_for_update():
     print("Checking for updates…")
+    wlan = network.WLAN(network.STA_IF)
+    if not wlan.isconnected():
+        print("Connecting WiFi for update check…")
+        wifi_manager()
+
     try:
         r = urequests.get(UPDATE_JSON, timeout=5)
         data = r.json()
@@ -75,17 +75,79 @@ def check_for_update():
             print("Update failed on:", file_name)
             return False
 
+    # Flag update so we can fetch log later
+    with open(UPDATED_FILE, "w") as f:
+        f.write("1\n")
+
     save_local_version(server_ver)
     print("Update done. Rebooting…")
     time.sleep(1)
     machine.reset()
     return True
 
+# ===== Run updater =====
 def run_updater():
+    print("Booting updater…")
+    wifi_manager()
+    wlan = network.WLAN(network.STA_IF)
+    if wlan.isconnected():
         check_for_update()
         wlan.active(False)
     else:
         print("Skipping update, no WiFi.")
-        return "no wifi"
 
+# ===== Post-boot update log fetch =====
+def show_update_log():
+    wlan = network.WLAN(network.STA_IF)
+    if not wlan.active():
+        wlan.active(True)
+
+    if UPDATED_FILE in os.listdir():
+        with open(UPDATED_FILE, "r") as f:
+            flag = f.read().strip()
+        if flag == "1":
+            # Ensure WiFi is connected
+            if not wlan.isconnected():
+                print("Reconnecting WiFi for update log…")
+                wifi_manager()
+
+            # Resolve GitHub host
+            try:
+                addr = socket.getaddrinfo("raw.githubusercontent.com", 443)[0][-1]
+                print("GitHub resolved to:", addr)
+            except Exception as e:
+                print("DNS resolution failed:", e)
+                return
+
+            # Attempt to fetch update log with retries
+            for attempt in range(3):
+                try:
+                    r = urequests.get(UPDATE_LOG_URL, timeout=10)
+                    if r.status_code == 200:
+                        update_log = r.text
+                        print("\n=== UPDATE LOG ===")
+                        print(update_log)
+                        print("==================\n")
+                        r.close()
+
+                        # Append to previous_updates.txt
+                        try:
+                            with open(PREV_UPDATES_FILE, "a") as f:
+                                f.write(f"--- Update fetched on {time.localtime()} ---\n")
+                                f.write(update_log + "\n\n")
+                        except Exception as e:
+                            print("Failed to write to previous_updates.txt:", e)
+
+                        # Reset flag
+                        with open(UPDATED_FILE, "w") as f:
+                            f.write("0\n")
+                        break
+                    else:
+                        print("HTTP error fetching update log:", r.status_code)
+                        r.close()
+                except Exception as e:
+                    print(f"Attempt {attempt+1} failed:", e)
+                    time.sleep(2)
+            else:
+                print("Failed to fetch update log after 3 attempts.")
 
