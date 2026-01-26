@@ -6,3 +6,4 @@ more minor features:
   -fixed crash when updating
   -made show day of week
   -added app functionality (WIP)
+  -added update log showing
