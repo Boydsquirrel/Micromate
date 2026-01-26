@@ -86,7 +86,7 @@ time.sleep(1.5)
 disp.clear(color565(0, 0, 0))
 max_lines = 9   # number of lines you want on screen
 line_height = 12
-x, y = 10, 120
+x, y = 20, 0
 
 lines = log_text.splitlines()
 for i, line in enumerate(lines[:max_lines]):
