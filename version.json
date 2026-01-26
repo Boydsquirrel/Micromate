@@ -1,4 +1,4 @@
 {
-    "version": "0.0.2.6",
-    "files": ["main.py"]
+    "version": "0.1.0.0",
+    "files": ["main.py", "ili9341.py", "buttons.py"]
 }
