@@ -1,11 +1,8 @@
-VERSION: 0.0.2.6 
-Welcome to a new very minor update were we have added a new feature:
+VERSION: 0.1.0
+Welcome to a new very major update were we have added new functionallity:
   ---Update logs---
-now on a new boot after
-a upadate it shows what
-was added like this 
-it also will save all 
-the updates in a text 
-file called 
-previous_updates.txt
-hope you enjoy! :)
+ADDED DISPLAY SUPPORT!
+more minor features:
+  -fixed crash when updating
+  -made show day of week
+  -added app functionality (WIP)
