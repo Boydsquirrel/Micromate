@@ -19,7 +19,7 @@ boot = True
 #DISPLAY SETUP
 # Setup hardware SPI
 from updatelog import get_update_log
-
+log_text = get_update_log()
 # then anywhere in your code:
 
 #first boot
@@ -84,9 +84,9 @@ disp.draw_image("splash.raw") #shows micromate logo
 
 time.sleep(1.5)
 disp.clear(color565(0, 0, 0))
-log = get_update_log()
-if log:
-    disp.draw_text8x8(10, 120, log, 0xFFFF)
+if log_text:
+    # truncate so it fits on screen
+    disp.draw_text8x8(10, 120, log_text[:200], 0xFFFF)
 
 #APP HANDLING LOGIC
 
