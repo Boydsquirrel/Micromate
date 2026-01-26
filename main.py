@@ -92,7 +92,7 @@ lines = log_text.splitlines()
 for i, line in enumerate(lines[:max_lines]):
     # truncate each line so it fits horizontally
     disp.draw_text8x8(x, y + i*line_height, line[:30], 0xFFFF)
-    time.sleep(5)
+time.sleep(5)
 
 #APP HANDLING LOGIC
 
