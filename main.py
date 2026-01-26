@@ -84,7 +84,7 @@ disp.draw_image("splash.raw") #shows micromate logo
 
 time.sleep(1.5)
 disp.clear(color565(0, 0, 0))
-max_lines = 5   # number of lines you want on screen
+max_lines = 9   # number of lines you want on screen
 line_height = 12
 x, y = 10, 120
 
@@ -92,6 +92,7 @@ lines = log_text.splitlines()
 for i, line in enumerate(lines[:max_lines]):
     # truncate each line so it fits horizontally
     disp.draw_text8x8(x, y + i*line_height, line[:30], 0xFFFF)
+    time.sleep(5)
 
 #APP HANDLING LOGIC
 
