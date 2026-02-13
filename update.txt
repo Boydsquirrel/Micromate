@@ -1,9 +1,9 @@
-VERSION: 0.1.0
-Welcome to a new very major update were we have added new functionallity:
+VERSION: 0.1.1
+Welcome to a new update were we have added new functionallity:
   ---Update logs---
-ADDED DISPLAY SUPPORT!
-more minor features:
-  -fixed crash when updating
-  -made show day of week
-  -added app functionality (WIP)
-  -added update log showing
+added app icons
+added weather app
+added settings app
+bug fixes:
+  -fixed button 4 not working
+  -fixed app crash not drawing homescreen 
