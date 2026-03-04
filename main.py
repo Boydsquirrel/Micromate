@@ -38,7 +38,6 @@ write_flag_once()
 
 # ====== WIFI & TIME ======
 wifi.wifi_manager()
-time.sleep(2)
 try:
     ntptime.settime()
 except:
