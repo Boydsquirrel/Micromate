@@ -1,4 +1,4 @@
 {
-    "version": "0.1.1.0",
-    "files": ["main.py", "buttons.py"]
+    "version": "0.1.2.0",
+    "files": ["buttons.py", "text_input.py", "touch_calibrate.py"]
 }
