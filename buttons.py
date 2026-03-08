@@ -5,7 +5,7 @@ from machine import Pin
 button1 = Pin(17, Pin.IN, Pin.PULL_UP)
 button2 = Pin(19, Pin.IN, Pin.PULL_UP)
 button3 = Pin(18, Pin.IN, Pin.PULL_UP)
-button4 = Pin(4, Pin.IN, Pin.PULL_UP)
+button4 = Pin(16, Pin.IN, Pin.PULL_UP)
 
 def button_input():
     button_pressed = 0
@@ -38,3 +38,4 @@ def button_input():
         time.sleep(0.05)
     
     return button_pressed
+
