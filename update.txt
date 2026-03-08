@@ -1,9 +1,9 @@
-VERSION: 0.1.1
+VERSION: 0.1.2
 Welcome to a new update were we have added new functionallity:
   ---Update logs---
-added app icons
-added weather app
-added settings app
+  -Main features
+Touch is  now a workin in progress with working:
+calibration, rectangle demo and keeyboard
 bug fixes:
   -fixed button 4 not working
-  -fixed app crash not drawing homescreen 
+  -fixed longer boot time for no reason 11 seconds to 9
