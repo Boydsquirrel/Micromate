@@ -7,8 +7,8 @@ import gc
 
 # ================= CONFIG =================
 VERSION_FILE = "version.txt"
-BASE_URL     = "http://divine-cake-5679.boydsquirrel.workers.dev/"
-UPDATE_JSON  = "http://divine-cake-5679.boydsquirrel.workers.dev/version.json"
+BASE_URL     = "http://noisy-disk-eb8d.cross-boyd.workers.dev/"
+UPDATE_JSON  = "http://noisy-disk-eb8d.cross-boyd.workers.dev/version.json"
 UPDATE_TXT   = BASE_URL + "update.txt"
 
 # ================= COLOURS =================
@@ -216,7 +216,6 @@ def check_for_update(disp=None):
         print("Wi-Fi not connected, skipping update.")
         return False
 
-    _show(disp, "Checking for updates...", color=CYAN)
 
     try:
         import urequests
@@ -247,8 +246,6 @@ def check_for_update(disp=None):
 
     if ver(local_ver) >= ver(server_ver):
         print("Already up to date.")
-        _show(disp, "Already up to date", "v" + local_ver, color=GREEN)
-        time.sleep(1)
         return False
 
     # fetch changelog
