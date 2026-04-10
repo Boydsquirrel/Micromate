@@ -1,9 +1,9 @@
-VERSION: 0.1.2
-Welcome to a new update were we have added new functionallity:
+VERSION: 0.1.3
+Welcome to a new update were we have 
+added new functionallity:
   ---Update logs---
   -Main features
-Touch is  now a workin in progress with working:
-calibration, rectangle demo and keeyboard
-bug fixes:
-  -fixed button 4 not working
-  -fixed longer boot time for no reason 11 seconds to 9
+Improved wifi connectivity when connecting 
+for updates
+{developer} improved crash logs now saving 
+and printing to help with debugging apps
