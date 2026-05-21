@@ -12,7 +12,7 @@ from machine import Pin
 _b1 = Pin(17, Pin.IN, Pin.PULL_UP)  # RIGHT
 _b2 = Pin(19, Pin.IN, Pin.PULL_UP)  # LEFT
 _b3 = Pin(18, Pin.IN, Pin.PULL_UP)  # SELECT
-_b4 = Pin(16,  Pin.IN, Pin.PULL_UP)  # ROW UP / cancel if empty
+_b4 = Pin(16, Pin.IN, Pin.PULL_UP)  # ROW UP / cancel if empty
 _last = [1, 1, 1, 1]
 
 def _btn():
@@ -21,7 +21,8 @@ def _btn():
     for i in range(4):
         v = pins[i].value()
         if v == 0 and _last[i] == 1:
-            _last[i] = 0
+            # FIX: snapshot all pin states BEFORE returning,
+            # not after setting _last[i]=0 (which was immediately overwritten)
             _last = [pins[j].value() for j in range(4)]
             return i + 1
         _last[i] = v
@@ -87,7 +88,7 @@ KB_Y0      = TEXTBOX_H + 4   # 84
 KEY_W      = 28
 KEY_H      = 28
 KEY_SP     = 3
-CHARS_LINE = 38               # chars per textbox line  (8px font, 8px wide)
+CHARS_LINE = 38               # chars per textbox line (8px font, 8px wide)
 LINE_H     = 11               # textbox line height px
 TEXT_Y0    = 18               # y of first text line inside textbox
 
@@ -96,6 +97,19 @@ _LAYOUTS = {
     "123": ["1234567890", "!@#$%^&*()", "+-=.,?;:_"],
 }
 _MODE_ORDER = ["ABC", "123"]
+
+# ===== VAL HANDLER =====
+def _handle_val(val, text, mode_idx):
+    """
+    Returns: new text string  — character added/deleted
+             None             — mode switch requested
+             False            — DONE
+    """
+    if val == "DONE": return False
+    if val == "MODE": return None
+    if val == "DEL":  return text[:-1]
+    if val == " ":    return text + " "
+    return text + val
 
 # ===== BUILD KEYS =====
 # Each key tuple: (x, y, w, h, val, row, col)
@@ -204,6 +218,7 @@ def get_input(disp, prompt="", prefill=""):
     _draw_keyboard(disp, keys, cidx)
 
     _last_touch = None
+    _keypress_count = 0  # periodic gc counter
 
     while True:
         # ---- touch ----
@@ -227,6 +242,7 @@ def get_input(disp, prompt="", prefill=""):
                     _draw_keyboard(disp, keys, cidx)
                 else:
                     text = changed
+                    _keypress_count += 1
                     _draw_key(disp, keys[hi])
                     _draw_textbox(disp, prompt, text)
         elif not tp:
@@ -259,6 +275,7 @@ def get_input(disp, prompt="", prefill=""):
                     continue
                 else:
                     text = changed
+                    _keypress_count += 1
                     _draw_textbox(disp, prompt, text)
 
             elif btn == 4:  # ROW UP / cancel
@@ -269,22 +286,12 @@ def get_input(disp, prompt="", prefill=""):
                 ccol = min(ccol, len([k for k in keys if k[5] == crow]) - 1)
 
             cidx = _cursor_index(keys, crow, ccol)
-            # redraw only changed keys
             for i, k in enumerate(keys):
                 _draw_key(disp, k, highlighted=(i == cidx))
 
+        # periodic gc every 20 keypresses
+        if _keypress_count >= 20:
+            gc.collect()
+            _keypress_count = 0
+
         time.sleep(0.02)
-
-# ===== VAL HANDLER =====
-def _handle_val(val, text, mode_idx):
-    """
-    Returns: new text string  — character added/deleted
-             None             — mode switch requested
-             False            — DONE
-    """
-    if val == "DONE": return False
-    if val == "MODE": return None
-    if val == "DEL":  return text[:-1]
-    if val == " ":    return text + " "
-    return text + val
-
