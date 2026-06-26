@@ -13,7 +13,7 @@ import json
 import math
 import sys
 
-print("welcome to the micrromate")
+print("welcome to the micromate")
 
 # ===== CRASH LOGGER =====
 def log_crash(app_name, error):
