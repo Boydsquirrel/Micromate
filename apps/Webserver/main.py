@@ -127,10 +127,10 @@ def run(disp):
         safe = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/=')
         return ''.join([c if c in safe else '%{:02X}'.format(ord(c)) for c in str(s)])
 
-    # ── Chunked send — PRIMARY ENOBUFS FIX ───────────────────────────────────
-    # Never pass a large buffer to conn.send() directly.
-    # send_all() breaks it into CHUNK-byte pieces and retries on ENOBUFS (105).
-    CHUNK = 512
+    # ── Chunked send ──────────────────────────────────────────────────────────
+    # CHUNK kept at 256 bytes to stay well inside the lwIP TCP send buffer.
+    # Retries up to 20x on ENOBUFS (errno 105) with a 10 ms back-off each time.
+    CHUNK = 256
 
     def send_all(conn, data):
         if isinstance(data, str):
@@ -143,16 +143,28 @@ def run(disp):
             while retries < 20:
                 try:
                     n = conn.send(mv[sent:sent + CHUNK])
-                    sent += n
+                    if n:
+                        sent += n
                     break
                 except OSError as e:
                     if e.args[0] == 105:   # ENOBUFS
-                        time.sleep_ms(10)
+                        time.sleep_ms(20)  # slightly longer back-off
                         retries += 1
                     else:
                         raise
             else:
                 raise OSError(105, 'send buffer full after retries')
+
+    # ── send_str: sends a string in small pieces, never as one big blob ───────
+    def send_str_chunked(conn, s):
+        """Send a plain Python string through send_all without ever encoding
+        the whole thing at once — encodes and ships CHUNK bytes at a time."""
+        start = 0
+        length = len(s)
+        while start < length:
+            end = min(start + CHUNK, length)
+            send_all(conn, s[start:end].encode('utf-8'))
+            start = end
 
     # HTTP helpers
     def send_headers(conn, code=200, ct='text/html', length=None, extra=''):
@@ -166,9 +178,10 @@ def run(disp):
         if length is not None:
             h += 'Content-Length: {}\r\n'.format(length)
         h += 'Connection: close\r\n\r\n'
-        send_all(conn, h)
+        send_all(conn, h)       # headers are short — always fits
 
-    def send_str(conn, code, ct, body):
+    def send_response(conn, code, ct, body):
+        """Send a short text response with a known Content-Length."""
         b = body.encode('utf-8')
         send_headers(conn, code, ct, len(b))
         send_all(conn, b)
@@ -177,36 +190,39 @@ def run(disp):
         send_all(conn,
             'HTTP/1.1 302 Found\r\nLocation: {}\r\nConnection: close\r\n\r\n'.format(loc))
 
-    # Minimal CSS
-    CSS = ('<style>'
-           '*{box-sizing:border-box}'
-           'body{font-family:monospace;background:#0d0d0d;color:#bbb;margin:0;padding:8px}'
-           'h2{color:#0ff;margin:4px 0 10px;border-bottom:1px solid #222;padding-bottom:4px}'
-           'nav a{display:inline-block;padding:3px 8px;border:1px solid #0a0;color:#0c0;'
-           'text-decoration:none;margin:2px;font-size:.8em}'
-           'nav a:hover{background:#0c0;color:#000}'
-           'a.b{padding:2px 6px;border:1px solid #555;color:#aaa;text-decoration:none;'
-           'font-size:.8em;margin:1px}'
-           'a.b:hover{background:#555;color:#fff}'
-           'a.d{border-color:#833;color:#c44}'
-           'a.d:hover{background:#c44;color:#fff}'
-           'table{width:100%;border-collapse:collapse;font-size:.82em}'
-           'th{background:#1a1a1a;color:#0ff;padding:4px 6px;text-align:left}'
-           'td{padding:3px 6px;border-bottom:1px solid #1c1c1c}'
-           'tr:hover td{background:#141414}'
-           '.card{background:#141414;padding:8px;margin:6px 0;border-left:3px solid #0a0}'
-           'input[type=text],input[type=file]{background:#161616;color:#0d0;border:1px solid #444;'
-           'padding:5px;width:100%;margin:4px 0}'
-           'input[type=submit]{background:#161616;color:#0c0;border:1px solid #0a0;'
-           'padding:5px 14px;cursor:pointer;margin-top:6px}'
-           'input[type=submit]:hover{background:#0c0;color:#000}'
-           'pre{background:#111;padding:8px;overflow:auto;max-height:65vh;font-size:.8em;'
-           'border:1px solid #222;white-space:pre-wrap;word-break:break-all}'
-           'progress{width:100%;height:8px;accent-color:#0c0}'
-           '.w{color:#fa0;font-size:.8em}.ok{color:#0c0}.er{color:#c44}'
-           'footer{color:#333;font-size:.72em;margin-top:14px;'
-           'border-top:1px solid #1a1a1a;padding-top:6px}'
-           '</style>')
+    # ── CSS split into small pieces so no single string blows the buffer ──────
+    # Each piece is ≤ ~200 chars — well under CHUNK.
+    CSS_PARTS = [
+        '<style>',
+        '*{box-sizing:border-box}',
+        'body{font-family:monospace;background:#0d0d0d;color:#bbb;margin:0;padding:8px}',
+        'h2{color:#0ff;margin:4px 0 10px;border-bottom:1px solid #222;padding-bottom:4px}',
+        'nav a{display:inline-block;padding:3px 8px;border:1px solid #0a0;color:#0c0;'
+            'text-decoration:none;margin:2px;font-size:.8em}',
+        'nav a:hover{background:#0c0;color:#000}',
+        'a.b{padding:2px 6px;border:1px solid #555;color:#aaa;text-decoration:none;'
+            'font-size:.8em;margin:1px}',
+        'a.b:hover{background:#555;color:#fff}',
+        'a.d{border-color:#833;color:#c44}',
+        'a.d:hover{background:#c44;color:#fff}',
+        'table{width:100%;border-collapse:collapse;font-size:.82em}',
+        'th{background:#1a1a1a;color:#0ff;padding:4px 6px;text-align:left}',
+        'td{padding:3px 6px;border-bottom:1px solid #1c1c1c}',
+        'tr:hover td{background:#141414}',
+        '.card{background:#141414;padding:8px;margin:6px 0;border-left:3px solid #0a0}',
+        'input[type=text],input[type=file]{background:#161616;color:#0d0;border:1px solid #444;'
+            'padding:5px;width:100%;margin:4px 0}',
+        'input[type=submit]{background:#161616;color:#0c0;border:1px solid #0a0;'
+            'padding:5px 14px;cursor:pointer;margin-top:6px}',
+        'input[type=submit]:hover{background:#0c0;color:#000}',
+        'pre{background:#111;padding:8px;overflow:auto;max-height:65vh;font-size:.8em;'
+            'border:1px solid #222;white-space:pre-wrap;word-break:break-all}',
+        'progress{width:100%;height:8px;accent-color:#0c0}',
+        '.w{color:#fa0;font-size:.8em}.ok{color:#0c0}.er{color:#c44}',
+        'footer{color:#333;font-size:.72em;margin-top:14px;'
+            'border-top:1px solid #1a1a1a;padding-top:6px}',
+        '</style>',
+    ]
 
     NAV = ('<nav>'
            '<a href="/">Files</a> '
@@ -215,30 +231,42 @@ def run(disp):
            '<a href="/mkdir">New Dir</a>'
            '</nav>')
 
-    def page_head(title):
-        return ('<!DOCTYPE html><html><head>'
-                '<meta charset="utf-8">'
-                '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                '<title>{t}</title>' + CSS +
-                '</head><body>' + NAV +
-                '<h2>{t}</h2>').replace('{t}', htmlesc(title))
-
     PAGE_FOOT = '<footer>MicroMate WebServer &mdash; {}</footer></body></html>'.format(ip)
 
-    # Stream a page in pieces — body_parts is an iterable of strings.
-    # Nothing is ever held as one giant string; each part is sent as it's built.
+    # ── stream_page: sends header + CSS + nav + title + body parts + footer ───
+    # Nothing is ever concatenated into a single large string.
     def stream_page(conn, title, body_parts):
         send_headers(conn, 200, 'text/html')
-        send_all(conn, page_head(title))
+        # DOCTYPE + head open
+        send_all(conn, '<!DOCTYPE html><html><head>'
+                       '<meta charset="utf-8">'
+                       '<meta name="viewport" content="width=device-width,initial-scale=1">')
+        send_str_chunked(conn, '<title>{}</title>'.format(htmlesc(title)))
+        # CSS — one rule at a time
+        for part in CSS_PARTS:
+            send_all(conn, part)
+        # body open + nav + heading
+        send_all(conn, '</head><body>')
+        send_all(conn, NAV)
+        send_str_chunked(conn, '<h2>{}</h2>'.format(htmlesc(title)))
+        # caller-supplied body parts
         for part in body_parts:
             if part:
-                send_all(conn, part)
+                send_str_chunked(conn, part)
+                gc.collect()
+        # footer
         send_all(conn, PAGE_FOOT)
 
     def error_page(conn, code, msg):
-        title = 'Error {}'.format(code)
-        send_str(conn, code, 'text/html',
-                 page_head(title) + '<p class="er">{}</p>'.format(htmlesc(msg)) + PAGE_FOOT)
+        send_headers(conn, code, 'text/html')
+        send_all(conn, '<!DOCTYPE html><html><head><meta charset="utf-8">')
+        for part in CSS_PARTS:
+            send_all(conn, part)
+        send_all(conn, '</head><body>')
+        send_all(conn, NAV)
+        send_str_chunked(conn, '<h2>Error {}</h2>'.format(code))
+        send_str_chunked(conn, '<p class="er">{}</p>'.format(htmlesc(msg)))
+        send_all(conn, PAGE_FOOT)
 
     # File listing — generator so rows are built and sent one at a time
     def gen_file_rows(browse_path):
@@ -291,34 +319,34 @@ def run(disp):
                '<a class="b" href="/upload?p={}">Upload here</a> '
                '<a class="b" href="/mkdir?p={}">New dir here</a></p>').format(enc_path, enc_path)
 
-    def sysinfo_body():
+    # sysinfo as a generator so each card is sent immediately
+    def gen_sysinfo():
         cfg   = wlan.ifconfig()
         free  = gc.mem_free()
         used  = gc.mem_alloc()
         total = free + used
-        b  = '<div class="card"><b>Network</b><br>IP: {} &nbsp; Mask: {} &nbsp; GW: {}</div>'.format(
+        yield '<div class="card"><b>Network</b><br>IP: {} &nbsp; Mask: {} &nbsp; GW: {}</div>'.format(
             cfg[0], cfg[1], cfg[2])
-        b += ('<div class="card"><b>RAM</b><br>Free: {} KB &nbsp; Used: {} KB<br>'
-              '<progress value="{}" max="{}"></progress></div>').format(
+        yield ('<div class="card"><b>RAM</b><br>Free: {} KB &nbsp; Used: {} KB<br>'
+               '<progress value="{}" max="{}"></progress></div>').format(
             free//1024, used//1024, used, total)
         try:
             sv = os.statvfs('/')
             tb = sv[0] * sv[2]
             fb = sv[0] * sv[3]
-            b += ('<div class="card"><b>Flash</b><br>Total: {} KB &nbsp; '
-                  'Used: {} KB &nbsp; Free: {} KB<br>'
-                  '<progress value="{}" max="{}"></progress></div>').format(
+            yield ('<div class="card"><b>Flash</b><br>Total: {} KB &nbsp; '
+                   'Used: {} KB &nbsp; Free: {} KB<br>'
+                   '<progress value="{}" max="{}"></progress></div>').format(
                 tb//1024, (tb-fb)//1024, fb//1024, tb-fb, tb)
         except:
             pass
-        b += '<div class="card"><b>Server</b><br>Requests: {} &nbsp; Max upload: {} KB</div>'.format(
+        yield '<div class="card"><b>Server</b><br>Requests: {} &nbsp; Max upload: {} KB</div>'.format(
             req_count, MAX_UPLOAD//1024)
         try:
-            b += '<div class="card"><b>Root</b><br>{}</div>'.format(
+            yield '<div class="card"><b>Root</b><br>{}</div>'.format(
                 ', '.join(htmlesc(i) for i in sorted(os.listdir('/'))))
         except:
             pass
-        return b
 
     # Multipart parser
     def parse_multipart(data, ct):
@@ -359,7 +387,7 @@ def run(disp):
             gc.collect()
             if gc.mem_free() < MEM_MIN:
                 try:
-                    send_str(conn, 503, 'text/plain',
+                    send_response(conn, 503, 'text/plain',
                              'Low memory ({} B free). Try again.'.format(gc.mem_free()))
                 except:
                     pass
@@ -437,7 +465,7 @@ def run(disp):
                     ])
 
                 elif path == '/sysinfo':
-                    stream_page(conn, 'System Info', [sysinfo_body()])
+                    stream_page(conn, 'System Info', gen_sysinfo())
 
                 elif path == '/view':
                     fp = urldec(query.get('p', ''))
@@ -514,7 +542,7 @@ def run(disp):
             elif method == 'POST':
 
                 if content_length > MAX_UPLOAD:
-                    send_str(conn, 413, 'text/plain',
+                    send_response(conn, 413, 'text/plain',
                              'Body too large. Max {} KB.'.format(MAX_UPLOAD // 1024))
                     return
 
@@ -600,7 +628,6 @@ def run(disp):
                 error_page(conn, 400, 'Method not supported')
 
         except OSError as e:
-            # Log to display but don't try to send — connection may be broken.
             stat_bar('OSError {}: {}'.format(e.args[0], str(e)[:15]), RED)
         except Exception as e:
             stat_bar('Err: ' + str(e)[:28], RED)
