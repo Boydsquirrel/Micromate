@@ -1,3 +1,7 @@
+NOTE July 26 onward the esp-32 will upgrade to 16mb of flash and 8mb of psram meaning future versions will not be compatiable with the current esp-32
+
+
+
 This is the code for a electronics project I am working on in my spare time 
 I update it from time to time
 eventually i will amke the code encrypted once i come to a more complete version
