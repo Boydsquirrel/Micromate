@@ -1,5 +1,7 @@
-VERSION: 0.1.3.1
+VERSION: 0.1.5.0
 Welcome to a new update were we have 
 added new functionallity:
   ---Update logs---
-  hi toby
+  We have worked on a better home
+  display feature and worked on 
+  optimisation
