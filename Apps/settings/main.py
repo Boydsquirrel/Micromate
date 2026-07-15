@@ -1,0 +1,498 @@
+# apps/settings/main.py — settings app for Micromate
+import os
+import json
+import time
+import buttons
+import wifi
+from machine import Pin, PWM
+
+SETTINGS_PATH  = "/system/settings.json"
+_LOCATION_FILE = "/apps/weather/location.json"
+
+# ===== SCHEMA =====
+ITEMS = [
+    {"type": "slider", "key": "brightness", "label": "Brightness",
+     "min": 0, "max": 100, "suffix": "%", "default": 100},
+    {"type": "choice", "key": "ui",         "label": "Home UI",
+     "options": ["carousel", "text", "grid"], "default": "carousel"},
+    {"type": "action", "key": "wifi",        "label": "Wi-Fi Networks",
+     "hint": "B2=Open"},
+    {"type": "action", "key": "location",   "label": "Weather Location",
+     "hint": "B2=Open"},
+    {"type": "action", "key": "save",        "label": "Save & Exit",
+     "hint": "B2/B3=Save"},
+]
+
+# ===== COLOURS =====
+BG     = 0x0000
+WHITE  = 0xFFFF
+RED    = 0xF800
+GREEN  = 0x07E0
+GREY   = 0x8410
+CYAN   = 0x07FF
+SELECT = 0x07FF
+DIM    = 0x4208
+
+# ===== LAYOUT =====
+ITEM_START_Y     = 45
+ITEM_HEIGHT      = 55
+MAX_VISIBLE      = 3
+SLIDER_X         = 60
+SLIDER_W         = 200
+SLIDER_H         = 10
+KNOB_W           = 12
+KNOB_H           = 22
+LONG_PRESS_TICKS = 30
+
+# ===== TYPE SAFETY =====
+def validate_value(item, value):
+    if item["type"] == "slider":
+        try:   value = int(value)
+        except: return item["default"]
+        return max(item["min"], min(item["max"], value))
+    elif item["type"] == "toggle":
+        if isinstance(value, bool): return value
+        if isinstance(value, int):  return bool(value)
+        return item["default"]
+    elif item["type"] == "choice":
+        opts = item.get("options", [])
+        return value if value in opts else item["default"]
+    return value
+
+# ===== LOAD / SAVE =====
+def load_settings():
+    defaults = {item["key"]: item.get("default") for item in ITEMS}
+    try:
+        with open(SETTINGS_PATH, "r") as f:
+            raw = json.load(f)
+            for item in ITEMS:
+                key = item["key"]
+                if key in raw and item["type"] != "action":
+                    defaults[key] = validate_value(item, raw[key])
+    except: pass
+    return defaults
+
+def save_settings(settings):
+    try:
+        if "system" not in os.listdir("/"):
+            os.mkdir("/system")
+    except: pass
+    to_save = {k: v for k, v in settings.items()
+               if any(i["key"] == k and i["type"] != "action" for i in ITEMS)}
+    with open(SETTINGS_PATH, "w") as f:
+        json.dump(to_save, f)
+
+# ===== BACKLIGHT =====
+_pwm = None
+def make_backlight():
+    global _pwm
+    try:
+        _pwm = PWM(Pin(22))
+        _pwm.freq(1000)
+    except: _pwm = None
+
+make_backlight()
+
+def apply_brightness(value):
+    if _pwm:
+        _pwm.duty_u16(int((max(0, min(100, value)) / 100) * 65535))
+    else:
+        try: Pin(22, Pin.OUT).value(1 if value > 0 else 0)
+        except: pass
+
+# ===== SAVED LOCATION HELPERS =====
+
+def _load_saved_location():
+    try:
+        with open(_LOCATION_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return None
+
+def _save_location(city, cc, lat, lon):
+    try:
+        # Make sure /apps/weather/ exists
+        parts = _LOCATION_FILE.rsplit("/", 1)
+        if len(parts) == 2:
+            folder = parts[0]
+            # Try to create each directory level
+            path = ""
+            for part in folder.split("/"):
+                if not part:
+                    continue
+                path += "/" + part
+                try:
+                    os.mkdir(path)
+                except:
+                    pass
+        with open(_LOCATION_FILE, "w") as f:
+            json.dump({"city": city, "cc": cc, "lat": lat, "lon": lon, "manual": True}, f)
+        return True
+    except Exception as e:
+        print("_save_location error:", e)
+        return False
+
+def _clear_saved_location():
+    try:
+        os.remove(_LOCATION_FILE)
+    except:
+        pass
+
+# ===== DRAWING =====
+def draw_header(disp):
+    disp.fill_rectangle(0, 0, 320, 240, BG)
+    disp.fill_rectangle(0, 0, 320, 30, 0x2104)
+    disp.draw_text8x8(100, 11, "Settings", WHITE)
+    disp.fill_rectangle(0, 228, 320, 12, BG)
+    disp.draw_text8x8(5, 229, "Hold B3=Save  B3=Back  B4=Next", GREY)
+
+def draw_scroll_indicator(disp, scroll_offset, total):
+    bar_area_h = MAX_VISIBLE * ITEM_HEIGHT
+    disp.fill_rectangle(315, ITEM_START_Y, 5, bar_area_h, DIM)
+    if total > MAX_VISIBLE:
+        bar_h = max(6, (MAX_VISIBLE * bar_area_h) // total)
+        bar_y = ITEM_START_Y + (scroll_offset * bar_area_h) // total
+        disp.fill_rectangle(315, bar_y, 5, bar_h, WHITE)
+
+def draw_visible_items(disp, values, selected, scroll_offset):
+    disp.fill_rectangle(0, ITEM_START_Y, 315, MAX_VISIBLE * ITEM_HEIGHT, BG)
+    for slot in range(MAX_VISIBLE):
+        idx = scroll_offset + slot
+        if idx >= len(ITEMS): break
+        draw_item(disp, slot, ITEMS[idx], values.get(ITEMS[idx]["key"]), idx == selected)
+    draw_scroll_indicator(disp, scroll_offset, len(ITEMS))
+
+def draw_item(disp, slot, item, value, selected):
+    y  = ITEM_START_Y + slot * ITEM_HEIGHT
+    lc = SELECT if selected else WHITE
+    disp.fill_rectangle(0, y, 315, ITEM_HEIGHT - 2, BG)
+    if selected: disp.fill_rectangle(0, y, 315, ITEM_HEIGHT - 2, 0x1082)
+    disp.draw_text8x8(10, y + 4, item["label"], lc)
+    if item["type"] == "slider":
+        _draw_slider(disp, item, value, y + 24)
+    elif item["type"] == "toggle":
+        _draw_toggle(disp, value, y + 24)
+    elif item["type"] == "choice":
+        _draw_choice(disp, item, value, y + 24)
+    elif item["type"] == "action":
+        _draw_action(disp, item, selected, y + 24, item["key"])
+
+def _draw_slider(disp, item, value, y):
+    if value is None: value = item["default"]
+    pct   = (value - item["min"]) / (item["max"] - item["min"])
+    kx    = SLIDER_X + int(pct * SLIDER_W)
+    ky    = y - KNOB_H // 2 + SLIDER_H // 2
+    disp.fill_rectangle(SLIDER_X, y, SLIDER_W, SLIDER_H, WHITE)
+    disp.fill_rectangle(kx - KNOB_W // 2, ky, KNOB_W, KNOB_H, RED)
+    disp.fill_rectangle(262, y - 4, 58, 18, BG)
+    label = str(value) + item.get("suffix", "")
+    disp.draw_text8x8(265, y, label, WHITE)
+
+def _draw_toggle(disp, value, y):
+    disp.fill_rectangle(SLIDER_X, y - 2, 80, 16, BG)
+    label = "[ ON  ]" if value else "[ OFF ]"
+    color = GREEN if value else RED
+    disp.draw_text8x8(SLIDER_X, y, label, color)
+
+def _draw_choice(disp, item, value, y):
+    opts = item.get("options", [])
+    idx  = opts.index(value) if value in opts else 0
+    disp.fill_rectangle(SLIDER_X, y - 2, 240, 18, BG)
+    x = SLIDER_X
+    for i, opt in enumerate(opts):
+        label = opt[:8]
+        if i == idx:
+            disp.fill_rectangle(x - 2, y - 2, len(label) * 8 + 6, 14, CYAN)
+            disp.draw_text8x8(x, y, label, BG)
+        else:
+            disp.draw_text8x8(x, y, label, GREY)
+        x += len(label) * 8 + 14
+
+def _draw_action(disp, item, selected, y, key=None):
+    disp.fill_rectangle(SLIDER_X, y - 2, 250, 16, BG)
+    color = CYAN if selected else GREY
+
+    # For location: show current city name as the sub-label
+    if key == "location":
+        saved = _load_saved_location()
+        if saved and saved.get("manual"):
+            city = saved.get("city", "?")
+            cc   = saved.get("cc", "")
+            sub  = (city + ", " + cc)[:28]
+        else:
+            sub = "Auto-detect"
+        disp.draw_text8x8(SLIDER_X, y, sub, color)
+    else:
+        hint = item.get("hint", "B2=Open")
+        disp.draw_text8x8(SLIDER_X, y, hint, color)
+
+# ===== VALUE LOGIC =====
+def adjust_value(item, value, direction):
+    if item["type"] == "slider":
+        step = 1
+        return max(item["min"], min(item["max"], value + direction * step))
+    elif item["type"] == "toggle":
+        return direction > 0
+    elif item["type"] == "choice":
+        opts = item.get("options", [])
+        idx  = opts.index(value) if value in opts else 0
+        return opts[(idx + direction) % len(opts)]
+    return value
+
+def on_value_changed(key, value):
+    if key == "brightness":
+        apply_brightness(value)
+
+# ===== LOCATION SCREENS =====
+
+import urequests
+import gc
+
+API_KEY = "72f548955dac66aa7602503ca161cf4f"
+
+def _geocode(query):
+    try:
+        url = ("http://api.openweathermap.org/geo/1.0/direct"
+               "?q=" + query +
+               "&limit=5&appid=" + API_KEY)
+        r   = urequests.get(url)
+        raw = r.json()
+        r.close()
+        del r
+        gc.collect()
+        out = []
+        for item in raw:
+            name  = item.get("name", "")
+            cc    = item.get("country", "")
+            state = item.get("state", "")
+            lat   = item.get("lat", 0.0)
+            lon   = item.get("lon", 0.0)
+            display = (name + ", " + state + ", " + cc) if state else (name + ", " + cc)
+            out.append({"name": name, "cc": cc, "lat": lat, "lon": lon, "display": display})
+        return out
+    except Exception as e:
+        print("geocode error:", e)
+        return []
+
+def _draw_loc_main(disp, saved):
+    disp.fill_rectangle(0, 0, 320, 240, BG)
+    disp.fill_rectangle(0, 0, 320, 30, 0x2104)
+    disp.draw_text8x8(80, 11, "Weather Location", WHITE)
+    disp.draw_text8x8(10, 40, "Current:", GREY)
+    if saved and saved.get("manual"):
+        city = saved.get("city", "Unknown")
+        cc   = saved.get("cc", "")
+        lat  = saved.get("lat", 0)
+        lon  = saved.get("lon", 0)
+        disp.draw_text8x8(10, 58, (city + ", " + cc)[:36], WHITE)
+        disp.draw_text8x8(10, 74, (str(round(lat, 2)) + ", " + str(round(lon, 2)))[:36], GREY)
+        disp.draw_text8x8(10, 90, "(manual)", GREY)
+    else:
+        disp.draw_text8x8(10, 58, "Auto-detect", WHITE)
+        disp.draw_text8x8(10, 74, "(IP geolocation)", GREY)
+    disp.fill_rectangle(0, 110, 320, 2, GREY)
+    disp.draw_text8x8(10, 120, "B2: Search for a city", WHITE)
+    disp.draw_text8x8(10, 148, "B3: Use auto-detect", WHITE)
+    disp.draw_text8x8(0,  229, "B1=Back to Settings", GREY)
+
+def _draw_loc_results(disp, results, sel):
+    disp.fill_rectangle(0, 0, 320, 240, BG)
+    disp.fill_rectangle(0, 0, 320, 30, 0x2104)
+    disp.draw_text8x8(100, 11, "Select City", WHITE)
+    if not results:
+        disp.draw_text8x8(10, 80,  "No results found.", RED)
+        disp.draw_text8x8(10, 100, "Try a different name.", GREY)
+        disp.draw_text8x8(0,  229, "B1=Back", GREY)
+        return
+    for i, r in enumerate(results):
+        y = 35 + i * 38
+        if i == sel:
+            disp.fill_rectangle(0, y - 2, 320, 36, 0x1082)
+        c = CYAN if i == sel else WHITE
+        d = r["display"]
+        if len(d) > 37: d = d[:34] + "..."
+        disp.draw_text8x8(8, y,      d, c)
+        coord = str(round(r["lat"], 2)) + ",  " + str(round(r["lon"], 2))
+        disp.draw_text8x8(8, y + 18, coord, GREY)
+    disp.draw_text8x8(0, 229, "B1=Back B2=Down B3=Confirm", GREY)
+
+def _location_flow(disp):
+    """
+    Full location sub-screen.
+    Returns True if a change was made (city saved or auto-detect cleared), False if cancelled.
+    """
+    saved = _load_saved_location()
+    _draw_loc_main(disp, saved)
+
+    while True:
+        btn = buttons.button_input()
+        time.sleep(0.02)
+
+        if btn == 1:
+            return False
+
+        elif btn == 2:
+            # Search flow
+            try:
+                import keyboard
+            except ImportError:
+                disp.fill_rectangle(0, 100, 320, 30, BG)
+                disp.draw_text8x8(10, 110, "keyboard.py missing!", RED)
+                time.sleep(2)
+                _draw_loc_main(disp, saved)
+                continue
+
+            query = keyboard.get_input(disp, prompt="Search city:")
+            if not query or not query.strip():
+                _draw_loc_main(disp, saved)
+                continue
+
+            query = query.strip()
+            disp.fill_rectangle(0, 0, 320, 240, BG)
+            disp.draw_text8x8(10, 112, "Searching: " + query[:18] + "...", CYAN)
+            gc.collect()
+
+            results = _geocode(query)
+            gc.collect()
+
+            sel = 0
+            _draw_loc_results(disp, results, sel)
+
+            if not results:
+                while True:
+                    if buttons.button_input() == 1:
+                        break
+                    time.sleep(0.02)
+                _draw_loc_main(disp, saved)
+                continue
+
+            # Results picker
+            confirmed = False
+            while True:
+                b = buttons.button_input()
+                time.sleep(0.02)
+
+                if b == 1:
+                    break  # back to location main
+
+                elif b == 2:
+                    sel = (sel + 1) % len(results)
+                    _draw_loc_results(disp, results, sel)
+
+                elif b == 3:
+                    r = results[sel]
+                    _save_location(r["name"], r["cc"], r["lat"], r["lon"])
+                    # Confirmation flash
+                    disp.fill_rectangle(0, 0, 320, 240, BG)
+                    disp.draw_text8x8(10, 80,  "Saved!", GREEN)
+                    disp.draw_text8x8(10, 100, (r["name"] + ", " + r["cc"])[:36], WHITE)
+                    time.sleep(1)
+                    confirmed = True
+                    break
+
+            if confirmed:
+                return True
+
+            saved = _load_saved_location()
+            _draw_loc_main(disp, saved)
+
+        elif btn == 3:
+            # Auto-detect
+            _clear_saved_location()
+            disp.fill_rectangle(0, 0, 320, 240, BG)
+            disp.draw_text8x8(10, 112, "Auto-detect enabled.", GREEN)
+            time.sleep(1)
+            return True
+
+# ===== ACTION HANDLER =====
+def fire_action(disp, key, values, settings):
+    if key == "wifi":
+        wifi.manual_mode(disp)
+    elif key == "location":
+        _location_flow(disp)
+        # Redraw settings after returning
+        return False   # don't exit settings, just redraw
+    elif key == "save":
+        settings.update({k: v for k, v in values.items() if v is not None})
+        save_settings(settings)
+        disp.fill_rectangle(80, 100, 160, 40, 0x07E0)
+        disp.draw_text8x8(100, 116, "Saved!", BG)
+        time.sleep(1)
+        return True
+    return False
+
+def clamp_scroll(selected, scroll_offset):
+    if selected < scroll_offset:
+        return selected
+    if selected >= scroll_offset + MAX_VISIBLE:
+        return selected - MAX_VISIBLE + 1
+    return scroll_offset
+
+# ===== MAIN =====
+def run(disp):
+    settings      = load_settings()
+    values        = {item["key"]: settings.get(item["key"]) for item in ITEMS}
+    selected      = 0
+    scroll_offset = 0
+
+    apply_brightness(values.get("brightness", 100))
+    draw_header(disp)
+    draw_visible_items(disp, values, selected, scroll_offset)
+
+    hold_counter = 0
+    last_btn     = None
+
+    while True:
+        btn = buttons.button_input()
+
+        item = ITEMS[selected]
+        key  = item["key"]
+
+        if btn == 3:
+            if item["type"] == "action" and key == "save":
+                if fire_action(disp, key, values, settings):
+                    return
+                draw_header(disp)
+                draw_visible_items(disp, values, selected, scroll_offset)
+            else:
+                return  # cancel, no save
+            last_btn = btn
+            time.sleep(0.05)
+            continue
+
+        # Hold speed ramp for B1/B2
+        if btn == last_btn and btn in (1, 2):
+            hold_counter += 1
+        else:
+            hold_counter = 0
+
+        step = 1
+        if hold_counter > 8:  step = 2
+        if hold_counter > 20: step = 5
+
+        if btn == 1 and item["type"] not in ("action",):
+            for _ in range(step):
+                values[key] = adjust_value(item, values[key], -1)
+            on_value_changed(key, values[key])
+            draw_item(disp, selected - scroll_offset, item, values[key], True)
+
+        elif btn == 2:
+            if item["type"] == "action":
+                if fire_action(disp, key, values, settings):
+                    return
+                draw_header(disp)
+                draw_visible_items(disp, values, selected, scroll_offset)
+            else:
+                for _ in range(step):
+                    values[key] = adjust_value(item, values[key], +1)
+                on_value_changed(key, values[key])
+                draw_item(disp, selected - scroll_offset, item, values[key], True)
+
+        elif btn == 4:
+            selected      = (selected + 1) % len(ITEMS)
+            scroll_offset = clamp_scroll(selected, scroll_offset)
+            draw_header(disp)
+            draw_visible_items(disp, values, selected, scroll_offset)
+
+        last_btn = btn
+        time.sleep(0.05)
