@@ -14,8 +14,32 @@ import math
 import sys
 
 print("welcome to the micromate")
+LAUNCH_FLAG_FILE = "/launch.flag"
+CAROUSEL_TARGET  = "CAROUSEL"
 
-# ===== CRASH LOGGER =====
+def _read_and_clear_launch_target():
+    try:
+        with open(LAUNCH_FLAG_FILE, "r") as f:
+            target = f.read().strip()
+        os.remove(LAUNCH_FLAG_FILE)
+        return target if target else None
+    except:
+        return None
+
+def _write_launch_target_and_reset(target):
+    try:
+        with open(LAUNCH_FLAG_FILE, "w") as f:
+            f.write(target)
+    except Exception as e:
+        print("Failed to write launch flag, staying put:", e)
+        return
+    machine.reset()
+
+_pending_launch_target = _read_and_clear_launch_target()
+_fast_boot = _pending_launch_target is not None and \
+             _pending_launch_target != CAROUSEL_TARGET
+
+#CRASH LOGGER 
 def log_crash(app_name, error):
     try:
         # prevent log getting too big
@@ -43,7 +67,7 @@ def log_crash(app_name, error):
         pass
 
 
-# ===== FIRST BOOT =====
+#FIRST BOOT
 FLAG_FILE = "firstboot.flag"
 
 def first_boot():
@@ -52,8 +76,8 @@ def first_boot():
         disp.fill_rectangle(0, 0, 320, 20, ACCENT)
         disp.draw_text8x8(8, 6, "Welcome to Micromate!", BG)
         disp.draw_text8x8(10, 50, "Connect to Wi-Fi?", TEXT_COLOR)
-        disp.draw_text8x8(10, 80, "B3 = Yes", 0x07E0)
-        disp.draw_text8x8(10, 100, "B4 = Skip", 0xF800)
+        disp.draw_text8x8(10, 80, "Yes", 0x07E0)
+        disp.draw_text8x8(10, 100, "Skip", 0xF800)
     except:
         pass
 
@@ -94,19 +118,20 @@ def write_flag_once():
         pass
 
 
-# ===== WIFI & TIME =====
-try:
-    wifi.wifi_manager()
+#WIFI TIME
+if not _fast_boot:
     try:
-        ntptime.settime()
+        wifi.wifi_manager()
+        try:
+            ntptime.settime()
+        except:
+            pass
     except:
         pass
-except:
-    pass
 
 gc.collect()
 
-# ===== DISPLAY =====
+#DISPLAY
 from ili9341 import Display
 spi = SPI(1, baudrate=40000000, sck=Pin(14), mosi=Pin(13), miso=Pin(12))
 disp = Display(spi, dc=Pin(2), cs=Pin(15), rst=Pin(0), width=320, height=240)
@@ -118,7 +143,7 @@ DIM        = 0x8410
 
 disp.clear(BG)
 
-# ===== SETTINGS =====
+#SETTINGS
 def load_system_settings():
     try:
         with open("/system/settings.json", "r") as f:
@@ -130,7 +155,7 @@ settings      = load_system_settings()
 last_activity = time.time()
 sleeping      = False
 
-# ===== BACKLIGHT =====
+#BACKLIGHT
 _pwm_backlight = None
 _backlight_pin = None
 
@@ -155,50 +180,50 @@ def apply_brightness(brightness):
     except:
         pass
 
+if not _fast_boot:
+    write_flag_once()
 
-# ===== FIRST BOOT CHECK =====
-write_flag_once()
-
-# ===== UPDATE =====
+#UPDATE
 gc.collect()
 gc.collect()
 print("Free mem before update:", gc.mem_free())
 
-# Reconnect if wifi dropped since boot
-try:
-    _wlan = network.WLAN(network.STA_IF)
-    if not _wlan.isconnected():
-        print("WiFi dropped, trying auto-reconnect...")
-        _wlan.active(True)
-
-        _deadline = time.time() + 5
-        while time.time() < _deadline:
-            if _wlan.isconnected():
-                print("Auto-reconnected:", _wlan.ifconfig()[0])
-                break
-            time.sleep(0.25)
-
+if not _fast_boot:
+    # Reconnect if wifi dropped since boot
+    try:
+        _wlan = network.WLAN(network.STA_IF)
         if not _wlan.isconnected():
-            print("Trying saved networks...")
-            wifi.try_auto_connect()
+            print("WiFi dropped, trying auto-reconnect...")
+            _wlan.active(True)
 
-        if _wlan.isconnected():
-            try:
-                ntptime.settime()
-            except:
-                pass
-except Exception as e:
-    print("Reconnect error:", e)
+            _deadline = time.time() + 5
+            while time.time() < _deadline:
+                if _wlan.isconnected():
+                    print("Auto-reconnected:", _wlan.ifconfig()[0])
+                    break
+                time.sleep(0.25)
 
-try:
-    updateer.run_updater(disp)
-except Exception as e:
-    print("Updater error:")
-    sys.print_exception(e)
+            if not _wlan.isconnected():
+                print("Trying saved networks...")
+                wifi.try_auto_connect()
+
+            if _wlan.isconnected():
+                try:
+                    ntptime.settime()
+                except:
+                    pass
+    except Exception as e:
+        print("Reconnect error:", e)
+
+    try:
+        updateer.run_updater(disp)
+    except Exception as e:
+        print("Updater error:")
+        sys.print_exception(e)
 
 gc.collect()
 
-# ===== WIFI ICON =====
+#WIFI ICON
 _last_wifi_state = None
 
 def draw_wifi_status(connected):
@@ -216,7 +241,7 @@ def draw_wifi_status(connected):
     except:
         pass
 
-# ===== STATUS BAR =====
+#STATUS BAR
 STATUS_H = 28
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _last_drawn_minute = -1
@@ -250,12 +275,13 @@ def update_clock():
 
 draw_status_bar()
 
-# ===== APP SYSTEM =====
+#APP SYSTEM
 ICON_SIZE  = 32
-ICON_BYTES = ICON_SIZE * ICON_SIZE * 2
 apps       = []
 selected   = 0
 icon_cache = {}
+
+from sprite import Sprite
 
 class App:
     def __init__(self, name, icon_path):
@@ -269,14 +295,12 @@ class App:
         if path in icon_cache:
             return icon_cache[path]
         try:
-            with open(path, "rb") as f:
-                data = f.read()
-                if len(data) == ICON_BYTES:
-                    icon_cache[path] = data
-                    return data
-        except:
-            pass
-        return None
+            sprite = Sprite(path)  # path points at icon.spr
+            icon_cache[path] = sprite
+            return sprite
+        except Exception as e:
+            print("Failed to load icon", path, ":", e)
+            return None
 
 def list_apps():
     result = []
@@ -289,161 +313,25 @@ def list_apps():
                 continue
             if "main.py" not in entries:
                 continue
-            icon = path + "/icon.raw" if "icon.raw" in entries else None
+            icon = path + "/icon.spr" if "icon.spr" in entries else None
             result.append(App(d, icon))
     except:
         pass
     return result
 
-def draw_icon(icon, x, y):
-    try:
-        disp.block(x, y, x + ICON_SIZE - 1, y + ICON_SIZE - 1, icon)
-    except:
-        pass
-
-# ===== LAYOUT CONSTANTS =====
-CENTER_X = 160
-CENTER_Y = 120
-SPACING  = 100
-
-DRAW_Y = STATUS_H + 2
-DRAW_H = 240 - DRAW_Y
-
-ICON_Y      = CENTER_Y - 16
-BORDER_TOP  = CENTER_Y - 40
-BORDER_BOT  = CENTER_Y + 40
-
-ICON_WIPE_Y = ICON_Y - 1
-ICON_WIPE_H = 4
-
-TEXT_Y = CENTER_Y + 44
-TEXT_H = 20
-
-ANIM_STRIP_Y = BORDER_TOP - 2
-ANIM_STRIP_H  = (ICON_Y + ICON_SIZE + ICON_WIPE_H) - ANIM_STRIP_Y
-
-# ===== CAROUSEL =====
-def draw_frame(offset, full_clear=False):
-    if full_clear:
-        try:
-            disp.fill_rectangle(0, DRAW_Y, 320, DRAW_H, BG)
-        except:
-            pass
-    else:
-        try:
-            disp.fill_rectangle(0, ANIM_STRIP_Y, 320, ANIM_STRIP_H, BG)
-        except:
-            pass
-        try:
-            disp.fill_rectangle(0, TEXT_Y, 320, TEXT_H, BG)
-        except:
-            pass
-
-    for i in range(-2, 3):
-        if not apps:
-            break
-        idx = (selected + i) % len(apps)
-        app = apps[idx]
-        x = CENTER_X + i * SPACING + offset
-        if x < -64 or x > 384:
-            continue
-        if app.icon:
-            try:
-                draw_icon(app.icon, x - 16, ICON_Y)
-            except:
-                pass
-
-    try:
-        disp.fill_rectangle(0, ICON_WIPE_Y, 320, ICON_WIPE_H, BG)
-    except:
-        pass
-
-    for i in range(-2, 3):
-        if not apps:
-            break
-        idx = (selected + i) % len(apps)
-        app = apps[idx]
-        x = CENTER_X + i * SPACING + offset
-        if x < -64 or x > 384:
-            continue
-        if i == 0 and offset == 0:
-            try:
-                disp.draw_rectangle(x - 40, BORDER_TOP, 80, 80, ACCENT)
-            except:
-                pass
-        text_color = TEXT_COLOR if (i == 0 and offset == 0) else DIM
-        try:
-            name_clamp = app.name[:16]
-            text_x = max(0, min(312, x - (len(name_clamp) * 4)))
-            disp.draw_text8x8(int(text_x), TEXT_Y + 4, name_clamp, text_color)
-        except:
-            pass
-
-# ===== ANIMATION =====
-_ANIM_ORDER = [0, -1, 1, -2, 2]
-ANIM_STEPS  = 6
-
-def _draw_icons_fast(offset):
-    try:
-        disp.fill_rectangle(0, ANIM_STRIP_Y, 320, ANIM_STRIP_H, BG)
-    except:
-        pass
-
-    for i in _ANIM_ORDER:
-        if not apps:
-            break
-        idx = (selected + i) % len(apps)
-        app = apps[idx]
-        x = CENTER_X + i * SPACING + offset
-        if x < -48 or x > 368:
-            continue
-        if app.icon:
-            try:
-                draw_icon(app.icon, x - 16, ICON_Y)
-            except:
-                pass
-
-    try:
-        disp.fill_rectangle(0, ICON_WIPE_Y, 320, ICON_WIPE_H, BG)
-    except:
-        pass
-
-def animate_scroll(direction):
-    if not apps or len(apps) <= 1:
-        return
-    gc.collect()
-    try:
-        disp.fill_rectangle(0, TEXT_Y, 320, TEXT_H, BG)
-    except:
-        pass
-
-    distance = SPACING * direction
-    offsets = []
-    for s in range(ANIM_STEPS + 1):
-        t = s / ANIM_STEPS
-        eased = 0.5 - 0.5 * math.cos(math.pi * t)
-        offsets.append(int(round(eased * distance)))
-
-    for offset in offsets:
-        _draw_icons_fast(offset)
-
-# ===== HOME & LAUNCH =====
+#HOME & LAUNCH
 def render_home():
-    global apps, selected
-    gc.collect()
-    apps = list_apps()
-    if not apps:
-        try:
-            disp.fill_rectangle(0, DRAW_Y, 320, DRAW_H, BG)
-            disp.draw_text8x8(88, CENTER_Y, "No apps found", TEXT_COLOR)
-        except:
-            pass
-        return
-    selected %= len(apps)
-    draw_status_bar()
-    draw_frame(0, full_clear=True)
+    # home_carousel.py owns its own apps/selected state internally via
+    # the Carousel class - this just re-enters the carousel UI loop.
+    _run_home_ui()
 
-def launch_app(app):
+def _execute_app(app_name):
+    """Actually run an app's run(disp) - no flag writing, no reset.
+    Used ONLY right after a fast-boot reset, when we already know (from
+    the launch flag we just read) that this app is what should run.
+    Never call this directly from the carousel - that goes through
+    launch_app() instead, which resets first so the app gets a clean
+    heap with the carousel's memory fully released."""
     try:
         try:
             disp.fill_rectangle(0, 0, 320, 240, BG)
@@ -452,7 +340,7 @@ def launch_app(app):
 
         gc.collect()
 
-        module_name = "apps." + app.name + ".main"
+        module_name = "apps." + app_name + ".main"
 
         try:
             if module_name in sys.modules:
@@ -468,62 +356,67 @@ def launch_app(app):
             raise Exception("no run() in app")
 
     except Exception as e:
-        print("App crashed:", app.name)
+        print("App crashed:", app_name)
         sys.print_exception(e)
 
-        log_crash(app.name, e)
+        log_crash(app_name, e)
 
         try:
-            disp.fill_rectangle(0, DRAW_Y, 320, DRAW_H, BG)
-            disp.draw_text8x8(10, CENTER_Y - 20, "App crashed", TEXT_COLOR)
-            disp.draw_text8x8(10, CENTER_Y, app.name[:20], 0xF800)
-            disp.draw_text8x8(10, CENTER_Y + 20, str(e)[:38], TEXT_COLOR)
+            disp.fill_rectangle(0, STATUS_H + 2, 320, 240 - (STATUS_H + 2), BG)
+            disp.draw_text8x8(10, 100, "App crashed", TEXT_COLOR)
+            disp.draw_text8x8(10, 120, app_name[:20], 0xF800)
+            disp.draw_text8x8(10, 140, str(e)[:38], TEXT_COLOR)
         except:
             pass
 
         time.sleep(2)
 
-    finally:
-        gc.collect()
-        render_home()
 
-render_home()
+def launch_app(app):
+    """Called by the carousel (or any future home UI) when the user
+    wants to launch an app. Does NOT run the app directly - the
+    carousel + all its Sprites/Scene/icon cache are still fully loaded
+    in RAM at this point, and apps need real headroom. Instead, this
+    writes the target to the launch flag and resets - the NEXT boot
+    (see top of this file) reads that flag before anything else runs
+    and calls _execute_app() with a genuinely clean heap."""
+    _write_launch_target_and_reset(app.name)
+    # machine.reset() does not return - if we ever get here, the reset
+    # itself failed (see _write_launch_target_and_reset's fallback).
+    print("launch_app: reset failed, app not launched:", app.name)
 
-# ===== MAIN LOOP =====
-while True:
-    update_clock()
-    try:
-        draw_wifi_status(network.WLAN(network.STA_IF).isconnected())
-    except:
-        pass
-
-    btn = buttons.button_input()
-
-    if apps:
-        if btn == 1:
-            animate_scroll(1)
-            selected = (selected - 1) % len(apps)
-            draw_frame(0)
-            gc.collect()
-
-        elif btn == 2:
-            animate_scroll(-1)
-            selected = (selected + 1) % len(apps)
-            draw_frame(0)
-            gc.collect()
-
-        elif btn == 3:
-            launch_app(apps[selected])
-
-        elif btn == 4:
-            render_home()
-
-    if btn:
-        last_activity = time.time()
-
-    if sleeping:
-        apply_brightness(settings.get("brightness", 100))
-        sleeping = False
+def _run_home_ui():
+    import home_carousel
 
     gc.collect()
-    time.sleep(0.01)
+    print("Free heap right before Carousel init:", gc.mem_free())
+
+    ctx = {
+        "disp":             disp,
+        "settings":         settings,
+        "apply_brightness": apply_brightness,
+        "list_apps":        list_apps,
+        "launch_app":       launch_app,
+        "draw_status_bar":  draw_status_bar,
+        "update_clock":     update_clock,
+        "draw_wifi_status": draw_wifi_status,
+        "STATUS_H":         STATUS_H,
+        "BG":               BG,
+        "TEXT_COLOR":       TEXT_COLOR,
+        "ACCENT":           ACCENT,
+        "DIM":              DIM,
+    }
+
+    home_carousel.run(ctx)
+
+if _fast_boot:
+    _execute_app(_pending_launch_target)
+    _write_launch_target_and_reset(CAROUSEL_TARGET)
+    print("Fast-boot return-to-carousel reset failed - falling back to "
+          "normal carousel loop without resetting.")
+    while True:
+        _run_home_ui()
+else:
+    # Normal full boot (cold boot, or explicitly returning to carousel).
+    while True:
+        _run_home_ui()
