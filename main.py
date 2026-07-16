@@ -7,7 +7,7 @@ import machine
 import time
 import os
 import ntptime
-from machine import Pin, SPI, PWM
+from machine import Pin, SPI, PWM, ADC
 import gc
 import json
 import math
@@ -241,6 +241,44 @@ def draw_wifi_status(connected):
     except:
         pass
 
+#BATTERY
+try:
+    _batt_adc = ADC(Pin(35))
+    _batt_adc.atten(ADC.ATTN_11DB)
+except:
+    _batt_adc = None
+
+def read_battery_voltage(samples=20, delay_ms=2):
+    """Quick averaged read - intentionally NOT a full 1-second blocking
+    loop like a standalone script could get away with, since this runs
+    inside the UI loop and can't freeze the display/input for a second
+    every time it's called. samples*delay_ms stays small (~40ms)."""
+    if not _batt_adc:
+        return None
+    try:
+        total = 0
+        for _ in range(samples):
+            total += _batt_adc.read()
+            time.sleep_ms(delay_ms)
+        average_raw = total / samples
+        adc_voltage = (average_raw / 4095) * 3.3
+        return adc_voltage * 2  # 1M + 1M divider
+    except:
+        return None
+
+def battery_percent():
+    """Rough linear map of single-cell LiPo voltage to percentage.
+    Not accurate near the bottom of the curve (real LiPo discharge
+    isn't linear), but good enough for a glance in the status bar."""
+    v = read_battery_voltage()
+    if v is None:
+        return None
+    if v >= 4.2:
+        return 100
+    if v <= 3.3:
+        return 0
+    return round((v - 3.3) / (4.2 - 3.3) * 100)
+
 #STATUS BAR
 STATUS_H = 28
 days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -267,8 +305,16 @@ def update_clock():
         day_str  = days[t[6]] if 0 <= t[6] < 7 else ""
         time_str = "{:02d}:{:02d}".format(t[3], t[4])
         disp.fill_rectangle(5,   0, 195, STATUS_H, BG)
+        disp.fill_rectangle(205, 0,  38, STATUS_H, BG)   # battery area
         disp.fill_rectangle(245, 0,  55, STATUS_H, BG)
         disp.draw_text8x8(5,   8, day_str,  TEXT_COLOR)
+
+        pct = battery_percent()
+        if pct is not None:
+            batt_str = "{:d}%".format(pct)
+            batt_color = 0x07E0 if pct > 20 else 0xF800  # green, red if low
+            disp.draw_text8x8(207, 8, batt_str, batt_color)
+
         disp.draw_text8x8(250,  8, time_str, TEXT_COLOR)
     except:
         pass
