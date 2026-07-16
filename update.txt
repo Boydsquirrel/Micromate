@@ -1,7 +1,6 @@
-VERSION: 0.1.5.0
+VERSION: 0.1.6.0
 Welcome to a new update were we have 
 added new functionallity:
-  ---Update logs---
-  We have worked on a better home
-  display feature and worked on 
-  optimisation
+  ---Update log---
+  Battery percentage
+  display
