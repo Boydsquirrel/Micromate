@@ -2,27 +2,33 @@
 # Usage:
 #   import keyboard
 #   result = keyboard.get_input(disp, prompt="Enter name:")
-#   # returns string on DONE, None on cancel (B4 when text empty)
+#   # returns typed string on DONE. Button 4 = row up only (no cancel).
 
 import time
 import gc
 from machine import Pin
 
 # ===== BUTTONS =====
-_b1 = Pin(17, Pin.IN, Pin.PULL_UP)  # RIGHT
-_b2 = Pin(19, Pin.IN, Pin.PULL_UP)  # LEFT
-_b3 = Pin(18, Pin.IN, Pin.PULL_UP)  # SELECT
-_b4 = Pin(16, Pin.IN, Pin.PULL_UP)  # ROW UP / cancel if empty
+try:
+    _b1 = Pin(19, Pin.IN, Pin.PULL_UP)  # RIGHT  #reversed
+    _b2 = Pin(17, Pin.IN, Pin.PULL_UP)  # LEFT #reversed
+    _b3 = Pin(18, Pin.IN, Pin.PULL_UP)  # SELECT
+    _b4 = Pin(26, Pin.IN, Pin.PULL_UP)  # ROW UP
+except Exception as e:
+    raise RuntimeError(
+        "keyboard.py: failed to init button pins 16-19 (%s). "
+        "Check for a pin conflict with buttons.py / launcher." % e
+    )
+
 _last = [1, 1, 1, 1]
 
 def _btn():
+    """Poll buttons 1-4. Returns 1/2/3/4 on press edge, else 0."""
     global _last
     pins = [_b1, _b2, _b3, _b4]
     for i in range(4):
         v = pins[i].value()
         if v == 0 and _last[i] == 1:
-            # FIX: snapshot all pin states BEFORE returning,
-            # not after setting _last[i]=0 (which was immediately overwritten)
             _last = [pins[j].value() for j in range(4)]
             return i + 1
         _last[i] = v
@@ -185,6 +191,20 @@ def _draw_keyboard(disp, keys, cidx):
     for i, k in enumerate(keys):
         _draw_key(disp, k, highlighted=(i == cidx))
 
+def _move_cursor(disp, keys, old_idx, new_idx):
+    """
+    Move the highlight from old_idx to new_idx by repainting only those
+    two keys, instead of the whole keyboard. Assumes `keys` hasn't
+    changed since old_idx was drawn (i.e. no mode switch in between —
+    those still need a full _draw_keyboard since the layout changes).
+    """
+    if old_idx == new_idx:
+        return
+    if old_idx is not None and 0 <= old_idx < len(keys):
+        _draw_key(disp, keys[old_idx], highlighted=False)
+    if new_idx is not None and 0 <= new_idx < len(keys):
+        _draw_key(disp, keys[new_idx], highlighted=True)
+
 # ===== CURSOR HELPERS =====
 def _cursor_index(keys, crow, ccol):
     row_keys = [(i, k) for i, k in enumerate(keys) if k[5] == crow]
@@ -202,7 +222,8 @@ def _hit_key(keys, tx, ty):
 def get_input(disp, prompt="", prefill=""):
     """
     Display keyboard, return typed string when DONE pressed.
-    Returns None if B4 pressed while text is empty (cancel).
+    Button 4 is row-up only (wraps top<->bottom) — there is currently
+    no cancel path out of this keyboard.
     """
     gc.collect()
 
@@ -216,6 +237,7 @@ def get_input(disp, prompt="", prefill=""):
 
     _draw_textbox(disp, prompt, text)
     _draw_keyboard(disp, keys, cidx)
+    hi_on_screen = cidx   # index currently drawn highlighted
 
     _last_touch = None
     _keypress_count = 0  # periodic gc counter
@@ -231,6 +253,13 @@ def get_input(disp, prompt="", prefill=""):
                 time.sleep(0.07)
                 val = keys[hi][4]
                 changed = _handle_val(val, text, mode_idx)
+
+                # FIX (bug 2): sync button cursor to the touched key
+                # BEFORE acting on it, so state stays consistent whether
+                # the key triggers DONE/MODE or a normal char/DEL/space.
+                crow, ccol = keys[hi][5], keys[hi][6]
+                cidx = hi
+
                 if changed is False:                 # DONE
                     gc.collect(); return text
                 elif changed is None:                # MODE switch
@@ -239,19 +268,24 @@ def get_input(disp, prompt="", prefill=""):
                     keys = _build_keys(mode)
                     crow, ccol = 0, 0
                     cidx = _cursor_index(keys, crow, ccol)
-                    _draw_keyboard(disp, keys, cidx)
+                    _draw_keyboard(disp, keys, cidx)   # layout changed, full redraw needed
+                    hi_on_screen = cidx
                 else:
                     text = changed
                     _keypress_count += 1
-                    _draw_key(disp, keys[hi])
+                    # FIX (bug 1): move highlight to the touched key instead
+                    # of always un-highlighting — keeps touch and button
+                    # cursor state visually in sync. OPTIMIZATION: only the
+                    # old + new key get repainted, not the whole keyboard.
+                    _move_cursor(disp, keys, hi_on_screen, cidx)
+                    hi_on_screen = cidx
                     _draw_textbox(disp, prompt, text)
         elif not tp:
             _last_touch = None
 
-        # ---- buttons ----
+        # ---- buttons 1-3 ----
         btn = _btn()
         if btn:
-            rows     = sorted(set(k[5] for k in keys))
             row_keys = [k for k in keys if k[5] == crow]
 
             if btn == 1:    # RIGHT
@@ -271,23 +305,24 @@ def get_input(disp, prompt="", prefill=""):
                     keys = _build_keys(mode)
                     crow, ccol = 0, 0
                     cidx = _cursor_index(keys, crow, ccol)
-                    _draw_keyboard(disp, keys, cidx)
+                    _draw_keyboard(disp, keys, cidx)   # layout changed, full redraw needed
+                    hi_on_screen = cidx
                     continue
                 else:
                     text = changed
                     _keypress_count += 1
                     _draw_textbox(disp, prompt, text)
 
-            elif btn == 4:  # ROW UP / cancel
-                if not text:
-                    gc.collect(); return None
+            elif btn == 4:  # ROW UP — always wraps top<->bottom
+                rows = sorted(set(k[5] for k in keys))
                 ri   = rows.index(crow)
                 crow = rows[(ri - 1) % len(rows)]
                 ccol = min(ccol, len([k for k in keys if k[5] == crow]) - 1)
 
-            cidx = _cursor_index(keys, crow, ccol)
-            for i, k in enumerate(keys):
-                _draw_key(disp, k, highlighted=(i == cidx))
+            new_cidx = _cursor_index(keys, crow, ccol)
+            _move_cursor(disp, keys, hi_on_screen, new_cidx)
+            cidx = new_cidx
+            hi_on_screen = cidx
 
         # periodic gc every 20 keypresses
         if _keypress_count >= 20:
