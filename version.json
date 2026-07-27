@@ -1,4 +1,4 @@
 {
-    "version": "0.1.6.9",
-    "files": ["main.py"]
+    "version": "0.1.7.0",
+    "files": ["main.py", "updateer.py"]
 }
