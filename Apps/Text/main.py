@@ -1,41 +1,14 @@
-# ─────────────────────────────────────────────────────────────────────────
-#  editor.py  ──  MicroMate Text Editor  v1.0
-#  Place at:  apps/editor/main.py      Entry: run(disp)
-#
-#  Features
-#  ────────
-#  • Scroll up/down through any file  (hold B1/B2 for fast scroll)
-#  • Edit any line in-place           (keyboard module)
-#  • Insert line below / above        • Duplicate line
-#  • Delete line                      • Move line up / down
-#  • 10-level undo                    • Find text  (navigate all hits)
-#  • Go to line number                • Line-overflow indicator (›)
-#  • Unsaved-changes marker (*)       • Save / Save As
-#  • New file                         • Open file  (scrollable browser)
-#  • Save-before-exit / open prompt
-#
-#  Controls  (main editing mode)
-#  ──────────────────────────────
-#  B1  UP      scroll cursor up   (hold = fast scroll)
-#  B2  DOWN    scroll cursor down (hold = fast scroll)
-#  B3  SELECT  edit current line
-#  B4  MENU    open action menu
-# ─────────────────────────────────────────────────────────────────────────
-
+#MicroMate Text Editor 
 import gc
 import os
 import time
 import keyboard
 from machine import Pin
 
-
-# ═════════════════════════════════════════════════════════════════════════
-#  BUTTONS   B1=UP  B2=DOWN  B3=SELECT  B4=MENU/BACK
-# ═════════════════════════════════════════════════════════════════════════
-_b1 = Pin(17, Pin.IN, Pin.PULL_UP)
-_b2 = Pin(19, Pin.IN, Pin.PULL_UP)
-_b3 = Pin(18, Pin.IN, Pin.PULL_UP)
-_b4 = Pin(16, Pin.IN, Pin.PULL_UP)
+_b1 = Pin(16, Pin.IN, Pin.PULL_UP)  # UP     
+_b2 = Pin(4, Pin.IN, Pin.PULL_UP)  # DOWN   
+_b3 = Pin(26, Pin.IN, Pin.PULL_UP)  # SELECT
+_b4 = Pin(18, Pin.IN, Pin.PULL_UP)  # MENU
 
 _bl = [1, 1, 1, 1]   # last seen pin levels
 _hs = [0, 0, 0, 0]   # ticks when button first went low
@@ -156,6 +129,10 @@ _ST_MENU   = 1
 _ST_BROWSE = 2
 _ST_FIND   = 3
 
+# Directory where all text files live. Everything is opened from and
+# saved into here rather than the filesystem root.
+_DIR = "/apps/text/"
+
 _lines  = [""]
 _fname  = "untitled.txt"
 _mod    = False
@@ -208,6 +185,21 @@ _MH   = _MHH + sum(_MIH if x else _MSH for x in _MITEMS) + 4
 # ═════════════════════════════════════════════════════════════════════════
 #  FILE I/O
 # ═════════════════════════════════════════════════════════════════════════
+def _ensure_dir():
+    """Make sure the text-file directory exists. Safe to call repeatedly."""
+    try:
+        os.mkdir(_DIR.rstrip("/"))
+    except OSError:
+        pass  # already exists (or filesystem doesn't support it — ignore)
+
+
+def _path_for(name):
+    """Turn a bare filename (or one that already includes a path) into
+    a full path inside _DIR."""
+    name = name.strip("/").split("/")[-1]   # strip any dir the user typed
+    return _DIR + name
+
+
 def _load(path):
     global _lines, _fname, _mod, _cur, _scr, _undo
     try:
@@ -231,11 +223,12 @@ def _write(path=None):
     """Write current buffer. Returns True on success."""
     global _mod, _fname
     if path is None:
-        path = "/" + _fname
+        path = _path_for(_fname)
+    _ensure_dir()
     try:
         with open(path, "w") as f:
             f.write("\n".join(_lines) + "\n")
-        _fname = path.lstrip("/").split("/")[-1]
+        _fname = path.strip("/").split("/")[-1]
         _mod   = False
         return True
     except OSError:
@@ -243,15 +236,16 @@ def _write(path=None):
 
 
 def _ls():
-    """List text-editable files from /."""
+    """List text-editable files from _DIR."""
     EXTS = ("txt", "py", "json", "log", "md", "cfg", "ini", "csv")
     out  = []
+    _ensure_dir()
     try:
-        for name in sorted(os.listdir("/")):
+        for name in sorted(os.listdir(_DIR.rstrip("/"))):
             ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
             if ext in EXTS:
                 try:
-                    sz = os.stat("/" + name)[6]
+                    sz = os.stat(_DIR + name)[6]
                 except:
                     sz = 0
                 out.append((name, sz))
@@ -375,6 +369,15 @@ def _draw_status(d):
     d.draw_text8x8(4, _SY + 3, txt[:38], C_TXT)
 
 
+def _flash_status(d, msg, color):
+    """Show a temporary message in the status bar. Clears the bar first —
+    drawing text directly on top of old status text left stale characters
+    behind whenever the new message was shorter than what was there
+    before (draw_text8x8 doesn't paint a background of its own)."""
+    d.fill_rectangle(0, _SY, _SW, _SH2, C_STAT)
+    d.draw_text8x8(4, _SY + 3, msg[:38], color)
+
+
 def _draw_hint(d):
     d.fill_rectangle(0, _NY, _SW, _NHT, C_HINT)
     if   _state == _ST_EDIT:   t = "UP/DN:scroll  SEL:edit  B4:menu"
@@ -468,7 +471,7 @@ def _draw_browser(d):
     d.draw_text8x8(_SW - len(info) * 8 - 4, 4, info, C_MDIM)
 
     if not _bfiles:
-        d.draw_text8x8(10, 50, "No editable files in /", C_TXT)
+        d.draw_text8x8(10, 50, "No editable files in " + _DIR, C_TXT)
         d.fill_rectangle(0, _NY, _SW, _NHT, C_HINT)
         d.draw_text8x8(4, _NY + 4, "B4:back", C_MDIM)
         return
@@ -626,7 +629,7 @@ def _act_save(d):
     ok = _write()
     _full(d)
     msg = "Saved: " + _fname if ok else "Save FAILED!"
-    d.draw_text8x8(4, _SY + 3, msg[:38], C_SAVED if ok else C_RED)
+    _flash_status(d, msg, C_SAVED if ok else C_RED)
     time.sleep(0.9)
     _draw_status(d)
 
@@ -637,11 +640,11 @@ def _act_sas(d):
     if res:
         if "." not in res:
             res += ".txt"
-        path = ("/" + res) if not res.startswith("/") else res
+        path = _path_for(res)
         ok   = _write(path)
         _full(d)
         msg = "Saved: " + _fname if ok else "Save FAILED!"
-        d.draw_text8x8(4, _SY + 3, msg[:38], C_SAVED if ok else C_RED)
+        _flash_status(d, msg, C_SAVED if ok else C_RED)
         time.sleep(0.9)
         _draw_status(d)
     else:
@@ -663,7 +666,7 @@ def _act_new(d):
         if "." not in res:
             res += ".txt"
         _lines = [""]
-        _fname = res
+        _fname = res.strip("/").split("/")[-1]
         _mod   = False
         _cur   = 0
         _scr   = 0
@@ -698,8 +701,7 @@ def _act_find(d):
             _state = _ST_FIND
         else:
             _full(d)
-            d.draw_text8x8(4, _SY + 3,
-                           ("Not found: " + _fterm)[:38], C_RED)
+            _flash_status(d, "Not found: " + _fterm, C_RED)
             time.sleep(1.0)
             _draw_status(d)
             return
@@ -727,7 +729,7 @@ def _act_undo(d):
         _full(d)
     else:
         _full(d)
-        d.draw_text8x8(4, _SY + 3, "Nothing to undo.", C_MDIM)
+        _flash_status(d, "Nothing to undo.", C_MDIM)
         time.sleep(0.7)
         _draw_status(d)
 
@@ -791,6 +793,7 @@ def run(disp):
     _fhits  = []
     _fpos   = 0
 
+    _ensure_dir()
     _flush()
     gc.collect()
     _full(disp)
@@ -830,6 +833,11 @@ def run(disp):
             elif b == 4:                   # MENU
                 _state = _ST_MENU
                 _msel  = 0
+                # FIX: the menu box (226px) doesn't quite cover the full
+                # 240px screen height, leaving a few px of the old hint
+                # bar text visible underneath at the bottom edge unless
+                # we clear the whole screen before drawing it.
+                disp.fill_rectangle(0, 0, _SW, _SH, C_BG)
                 _draw_menu(disp)
 
         # ── MENU STATE ────────────────────────────────────────────────
@@ -865,7 +873,7 @@ def run(disp):
                     _draw_browser(disp)
             elif b == 3:
                 if _bfiles:
-                    path    = "/" + _bfiles[_bsel][0]
+                    path    = _DIR + _bfiles[_bsel][0]
                     do_open = True
                     if _mod:
                         ch = _prompt_choice(disp)
@@ -923,3 +931,4 @@ def run(disp):
             _gcn = 0
 
         time.sleep(0.015)
+
