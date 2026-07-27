@@ -1,4 +1,4 @@
 {
-    "version": "0.1.6.1",
-    "files": ["keyboard.py"]
+    "version": "0.1.6.7",
+    "files": ["buttons.py", "keyboard.py"]
 }
