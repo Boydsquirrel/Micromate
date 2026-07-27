@@ -1,6 +1,6 @@
-VERSION: 0.1.6.7
+VERSION: 0.1.6.9
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  Incorperated new up and down 
-  buttons
+  Enhanced launching procces
+  better time management 
