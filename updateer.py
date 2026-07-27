@@ -22,8 +22,8 @@ YELLOW = 0xFFE0
 
 # ================= BUTTONS =================
 from machine import Pin
-_b3 = Pin(18, Pin.IN, Pin.PULL_UP)
-_b4 = Pin(4,  Pin.IN, Pin.PULL_UP)
+_b3 = Pin(4, Pin.IN, Pin.PULL_UP)
+_b4 = Pin(18,  Pin.IN, Pin.PULL_UP)
 _ls  = [1, 1]
 
 def _btn():
