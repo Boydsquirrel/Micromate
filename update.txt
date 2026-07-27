@@ -1,6 +1,6 @@
-VERSION: 0.1.6.9
+VERSION: 0.1.7.0
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  Enhanced launching procces
-  better time management 
+  Fixed updater button issue
+  better file management
