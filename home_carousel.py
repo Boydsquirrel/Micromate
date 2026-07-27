@@ -142,22 +142,19 @@ class Carousel:
             return False
 
         gc.collect()
-        print("--- handle_button({}) | free heap BEFORE: {} ---".format(
-            btn, gc.mem_free()))
-
-        if btn == 1:
+        if btn == "right":
             self.animate_scroll(1)
             self.selected = (self.selected - 1) % len(self.apps)
             self.update_slot_sprites()
             self.draw_frame(0)
             gc.collect()
-        elif btn == 2:
+        elif btn == "left":
             self.animate_scroll(-1)
             self.selected = (self.selected + 1) % len(self.apps)
             self.update_slot_sprites()
             self.draw_frame(0)
             gc.collect()
-        elif btn == 3:
+        elif btn == "select":
             self.launch_app(self.apps[self.selected])
             import json
             try:
@@ -167,13 +164,6 @@ class Carousel:
                     return True  # exit to dispatcher
             except: pass
             self.render_home()
-        elif btn == 4:
-            self.render_home()
-
-        gc.collect()
-        print("--- handle_button({}) | free heap AFTER:  {} | selected={} ---".format(
-            btn, gc.mem_free(), self.selected))
-
         return False
 
 
@@ -199,3 +189,4 @@ def run(ctx):
 
         gc.collect()
         time.sleep(0.01)
+
