@@ -1,6 +1,7 @@
-VERSION: 0.1.7.0
+VERSION: 0.1.7.1
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  Fixed updater button issue
-  better file management
+  Testing auto-update pipeline
+  (sorry for inconvenience there 
+  will be a couple of these)
