@@ -1,5 +1,6 @@
-VERSION: 0.7.4
+VERSION: 0.7.5
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  flappy bird highscore added
+  changed updater so it can handle
+  larger files
