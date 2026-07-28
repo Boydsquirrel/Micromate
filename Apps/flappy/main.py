@@ -1,4 +1,5 @@
 #flappy bird  game
+import os
 import time
 import random
 from machine import Pin
@@ -10,6 +11,7 @@ H = 240
 WHITE = 0xFFFF
 GREEN = 0x07E0
 BLACK = 0x0000
+YELLOW = 0xFFE0
 
 PIPE_WIDTH = 22
 PIPE_GAP = 70
@@ -20,6 +22,10 @@ PIPE_COUNT = 4
 GRAVITY = 1
 FLAP = -8              # snappier flap
 FRAME_DELAY = 0.015    # ~66 FPS
+
+# highscore file lives with the app, not in the general text-files folder
+_HS_DIR  = "/apps/flappy/"
+_HS_PATH = _HS_DIR + "highscore.txt"
 
 # ===== BUTTONS (non-blocking, edge detect) =====
 button1 = Pin(17, Pin.IN, Pin.PULL_UP)
@@ -38,6 +44,40 @@ def button_input():
             return i + 1
         _last_states[i] = s
     return 0
+
+
+# ===== HIGHSCORE PERSISTENCE =====
+def _ensure_dir():
+    """Create apps/flappy/ if it doesn't exist yet. Safe to call repeatedly."""
+    try:
+        os.mkdir("apps")
+    except OSError:
+        pass
+    try:
+        os.mkdir(_HS_DIR.rstrip("/"))
+    except OSError:
+        pass
+
+
+def _load_highscore():
+    """Return the stored highscore, or 0 if none exists / file is bad."""
+    try:
+        with open(_HS_PATH, "r") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _save_highscore(score):
+    """Write the new highscore. Returns True on success."""
+    _ensure_dir()
+    try:
+        with open(_HS_PATH, "w") as f:
+            f.write(str(score))
+        return True
+    except OSError:
+        return False
+
 
 # ===== PIPE CLASS with minimal erase to avoid flicker =====
 class Pipe:
@@ -111,8 +151,18 @@ class Pipe:
                 return True
         return False
 
+
+# ===== HUD =====
+def _draw_hud(disp, score, highscore):
+    # cleared width covers "Score: 999  Best: 999" comfortably
+    disp.fill_rectangle(0, 0, 200, 10, BLACK)
+    disp.draw_text8x8(4, 4, "Score:{}  Best:{}".format(score, highscore), WHITE)
+
+
 # ===== GAME RUN =====
 def run(disp):
+    highscore = _load_highscore()
+
     # bird
     bx = 60
     by = 120.0
@@ -128,14 +178,17 @@ def run(disp):
     # scoring
     score = 0
     prev_score = -1  # force initial draw
+    prev_highscore = -1
 
     disp.clear(BLACK)
     # initial draw
     for p in pipes:
         p.draw_at(disp)
     disp.fill_rectangle(bx, prev_by, 8, 8, WHITE)
-    # draw initial score
-    disp.draw_text8x8(4, 4, f"Score: {score}", WHITE)
+    # draw initial score/highscore
+    _draw_hud(disp, score, highscore)
+    prev_score = score
+    prev_highscore = highscore
 
     while True:
         btn = button_input()
@@ -169,13 +222,14 @@ def run(disp):
             # if previously the pipe's right edge was >= bird and now it's < bird, it just passed
             if p.right_edge_prev() >= bx and p.right_edge() < bx:
                 score += 1
+                if score > highscore:
+                    highscore = score
 
-        # draw/update score only if changed (minimal erase)
-        if score != prev_score:
-            # clear small area for score (assumes 8x8 per char, length small)
-            disp.fill_rectangle(0, 0, 90, 10, BLACK)
-            disp.draw_text8x8(4, 4, f"Score: {score}", WHITE)
+        # draw/update HUD only if changed (minimal erase)
+        if score != prev_score or highscore != prev_highscore:
+            _draw_hud(disp, score, highscore)
             prev_score = score
+            prev_highscore = highscore
 
         # collision
         if by < 0 or by > H:
@@ -191,8 +245,19 @@ def run(disp):
         prev_by = by
         time.sleep(FRAME_DELAY)
 
+    # persist highscore if this run beat it
+    old_highscore = _load_highscore()
+    new_best = highscore > old_highscore
+    if new_best:
+        _save_highscore(highscore)
+
     # game over
     disp.clear(BLACK)
-    disp.draw_text8x8(100, 120, "Game Over", WHITE)
-    time.sleep(1.5)
+    disp.draw_text8x8(100, 110, "Game Over", WHITE)
+    disp.draw_text8x8(88, 126, "Score: {}".format(score), WHITE)
+    if new_best:
+        disp.draw_text8x8(84, 142, "New Best: {}".format(highscore), YELLOW)
+    else:
+        disp.draw_text8x8(84, 142, "Best: {}".format(highscore), WHITE)
+    time.sleep(1.8)
     disp.clear(BLACK)
