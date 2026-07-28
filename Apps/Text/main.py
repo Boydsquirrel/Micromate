@@ -236,12 +236,17 @@ def _write(path=None):
 
 
 def _ls():
-    """List text-editable files from _DIR."""
-    EXTS = ("txt", "py", "json", "log", "md", "cfg", "ini", "csv")
+    """List text-editable files from _DIR.
+    main.py is always skipped — if it ever ends up in this folder it's
+    the app's own entry point, not something meant to be opened here."""
+    EXTS    = ("txt", "py", "json", "log", "md", "cfg", "ini", "csv")
+    HIDDEN  = ("main.py",)
     out  = []
     _ensure_dir()
     try:
         for name in sorted(os.listdir(_DIR.rstrip("/"))):
+            if name in HIDDEN:
+                continue
             ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
             if ext in EXTS:
                 try:
@@ -640,6 +645,12 @@ def _act_sas(d):
     if res:
         if "." not in res:
             res += ".txt"
+        if res.strip("/").split("/")[-1] == "main.py":
+            _full(d)
+            _flash_status(d, "Reserved name, pick another.", C_RED)
+            time.sleep(1.0)
+            _draw_status(d)
+            return
         path = _path_for(res)
         ok   = _write(path)
         _full(d)
@@ -665,6 +676,12 @@ def _act_new(d):
     if res:
         if "." not in res:
             res += ".txt"
+        if res.strip("/").split("/")[-1] == "main.py":
+            _full(d)
+            _flash_status(d, "Reserved name, pick another.", C_RED)
+            time.sleep(1.0)
+            _draw_status(d)
+            return
         _lines = [""]
         _fname = res.strip("/").split("/")[-1]
         _mod   = False
@@ -931,4 +948,3 @@ def run(disp):
             _gcn = 0
 
         time.sleep(0.015)
-
