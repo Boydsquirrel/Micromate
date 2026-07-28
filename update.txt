@@ -1,6 +1,5 @@
-VERSION: 0.7.3
+VERSION: 0.7.4
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  changes to the text editor for 
-  general improvement
+  flappy bird highscore added
