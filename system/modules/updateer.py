@@ -237,35 +237,57 @@ def _https_get(url, timeout=8):
     gc.collect()
     return body
 
-# ================= DOWNLOAD =================
+# ================= DOWNLOAD (STREAMING — memory-safe) =================
 def download_file(url, filename, retries=2):
+    """
+    Streams the HTTP response straight to a .tmp file in small chunks via
+    r.raw.read(), instead of pulling the whole body into memory with
+    r.text/r.content. This avoids needing one large contiguous heap
+    allocation (the cause of "memory allocation failed" on a fragmented
+    heap even when plenty of total free RAM is reported).
+    """
     _ensure_dirs(filename)
     gc.collect()
     import urequests
+
     for attempt in range(retries + 1):
+        r = None
         try:
             r = urequests.get(url, timeout=10)
+
             if r.status_code != 200:
                 print("HTTP", r.status_code, "for", filename)
                 r.close()
+                r = None
                 if attempt < retries:
                     time.sleep(1)
                     continue
                 return False
 
             tmp = filename + ".tmp"
-            binary_exts = (".raw", ".bin", ".png", ".jpg", ".jpeg", ".ico")
-            is_binary   = any(filename.lower().endswith(e) for e in binary_exts)
+            has_raw = hasattr(r, "raw") and r.raw is not None
 
-            if is_binary:
-                with open(tmp, "wb") as f:
+            # Write raw bytes for every file type — no text decoding.
+            # Decoding chunk-by-chunk breaks whenever a multi-byte UTF-8
+            # character lands across a 512-byte boundary (UnicodeError),
+            # and bytes-in/bytes-out is identical to text-in/text-out
+            # for reading the file back later regardless.
+            with open(tmp, "wb") as f:
+                if has_raw:
+                    while True:
+                        chunk = r.raw.read(512)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        gc.collect()
+                else:
+                    # Fallback: this urequests build has no usable .raw —
+                    # read the whole body (old behaviour) so downloads
+                    # still work while we sort out streaming.
                     f.write(r.content)
-            else:
-                with open(tmp, "w") as f:
-                    f.write(r.text)
 
             r.close()
-            del r
+            r = None
             gc.collect()
 
             try: os.remove(filename)
@@ -275,9 +297,13 @@ def download_file(url, filename, retries=2):
             return True
 
         except Exception as e:
-            print("Attempt", attempt + 1, "failed:", e)
-            try: r.close()
-            except: pass
+            import sys
+            print("Attempt", attempt + 1, "failed:", type(e).__name__, repr(e))
+            sys.print_exception(e)
+            if r:
+                try: r.close()
+                except: pass
+                r = None
             gc.collect()
             if attempt < retries:
                 time.sleep(1)
