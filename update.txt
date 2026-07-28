@@ -1,7 +1,5 @@
-VERSION: 0.1.7.2
+VERSION: 0.7.2
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  Testing auto-update pipeline
-  (sorry for inconvenience there 
-  will be a couple of these)
+  improved updater for the micromate
