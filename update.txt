@@ -1,6 +1,6 @@
-VERSION: 0.7.5
+VERSION: 0.7.6
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  changed updater so it can handle
-  larger files
+  added basic sound to the 
+  homescreen
