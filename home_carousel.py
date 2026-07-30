@@ -1,10 +1,12 @@
-
 import gc
 import time
 import math
-
+from machine import Pin, PWM
 from sprite import Scene
 
+piezo = PWM(Pin(25))
+piezo.freq(1000)
+piezo.duty_u16(0)
 
 class Carousel:
     CENTER_X = 160
@@ -27,8 +29,16 @@ class Carousel:
         self.ACCENT            = ctx["ACCENT"]
         self.DIM               = ctx["DIM"]
 
+        # Dock hooks - optional via .get() so this still runs even if
+        # main.py's ctx doesn't have them (older boot script version)
+        self.draw_dock_fn  = ctx.get("draw_dock")
+        self.dock_reset_fn = ctx.get("dock_reset")
+        self.DOCK_Y        = ctx.get("DOCK_Y", 240)  # falls back to "no dock" if absent
+
         self.DRAW_Y   = STATUS_H + 2
-        self.DRAW_H   = 240 - self.DRAW_Y
+        # Stop the carousel's own clears above the dock bar so full_clear
+        # doesn't paint over it every redraw.
+        self.DRAW_H   = self.DOCK_Y - self.DRAW_Y
         self.ICON_Y   = self.CENTER_Y - 16
         self.BORDER_T = self.CENTER_Y - 40
         self.TEXT_Y   = self.CENTER_Y + 44
@@ -104,10 +114,27 @@ class Carousel:
                 disp.draw_text8x8(int(tx), self.TEXT_Y+4, nc, tc)
             except: pass
 
+    def draw_dock(self, force=False):
+        """Push the current selected app's name to the dock. force=True
+        also resets the dock's internal dirty-check first, needed after
+        anything (full_clear, returning from an app) may have wiped the
+        dock area on screen without dock.py knowing about it."""
+        if not self.apps or self.draw_dock_fn is None:
+            return
+        if force and self.dock_reset_fn is not None:
+            self.dock_reset_fn()
+        try:
+            self.draw_dock_fn(self.apps[self.selected].name)
+        except:
+            pass
+
     def draw_frame(self, offset, full_clear=False):
         self.position_slots(offset)
         self.scene.render()
         self.draw_labels_and_border(offset, full_clear=full_clear)
+        if full_clear:
+            # full_clear just wiped the dock's row too - force it back
+            self.draw_dock(force=True)
 
     def animate_scroll(self, direction):
         if not self.apps or len(self.apps) <= 1:
@@ -135,7 +162,7 @@ class Carousel:
         self.selected %= len(self.apps)
         self.update_slot_sprites()
         self.draw_status_bar()
-        self.draw_frame(0, full_clear=True)
+        self.draw_frame(0, full_clear=True)  # draw_frame handles dock via force=True
 
     def handle_button(self, btn):
         if not self.apps or btn == 0:
@@ -143,18 +170,25 @@ class Carousel:
 
         gc.collect()
         if btn == "right":
+            beep(1000)
             self.animate_scroll(1)
             self.selected = (self.selected - 1) % len(self.apps)
             self.update_slot_sprites()
             self.draw_frame(0)
+            self.draw_dock()
+            
             gc.collect()
         elif btn == "left":
+            beep(1000)
             self.animate_scroll(-1)
             self.selected = (self.selected + 1) % len(self.apps)
             self.update_slot_sprites()
             self.draw_frame(0)
+            self.draw_dock()
             gc.collect()
+            
         elif btn == "select":
+            eep(600)
             self.launch_app(self.apps[self.selected])
             import json
             try:
@@ -163,7 +197,8 @@ class Carousel:
                 if new.get("ui", "carousel") != "carousel":
                     return True  # exit to dispatcher
             except: pass
-            self.render_home()
+            self.render_home()  # full_clear path re-forces the dock too
+            
         return False
 
 
@@ -189,4 +224,9 @@ def run(ctx):
 
         gc.collect()
         time.sleep(0.01)
-
+        
+def beep(freq):
+    piezo.freq(freq)
+    piezo.duty_u16(30000)
+    time.sleep(0.1)
+    piezo.duty_u16(0)
