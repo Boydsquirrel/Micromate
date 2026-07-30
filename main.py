@@ -10,7 +10,7 @@ import machine
 import time
 import os
 import ntptime
-from machine import Pin, SPI
+from machine import Pin, SPI, PWM
 import gc
 import json
 
