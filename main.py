@@ -93,7 +93,7 @@ gc.collect()
 #DISPLAY
 from ili9341 import Display
 spi = SPI(1, baudrate=40000000, sck=Pin(14), mosi=Pin(13), miso=Pin(12))
-disp = Display(spi, dc=Pin(2), cs=Pin(15), rst=Pin(0), width=320, height=240, rotation=180)
+disp = Display(spi, dc=Pin(2), cs=Pin(15), rst=Pin(0), width=320, height=240, rotation=180, bgr=False)
 
 BG         = 0x0000
 TEXT_COLOR = 0xFFFF
@@ -215,3 +215,4 @@ else:
     # Normal full boot (cold boot, or explicitly returning to carousel).
     while True:
         _run_home_ui()
+
