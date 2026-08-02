@@ -1,5 +1,6 @@
-VERSION: 0.7.6.1
+VERSION: 0.7.7
 Welcome to a new update were we have 
 added new functionallity:
   ---Update log---
-  slight edit to cloudfare updater
+  fixed incorrect colours for images
+  in home screen
